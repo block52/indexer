@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: poker-indexer-db
+    environment:
+      POSTGRES_USER: poker
+      POSTGRES_PASSWORD: poker_indexer_dev
+      POSTGRES_DB: poker_hands
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./sql/analysis.sql:/docker-entrypoint-initdb.d/02-analysis.sql:ro
+      - ./sql/player_stats.sql:/docker-entrypoint-initdb.d/03-player_stats.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poker -d poker_hands"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - indexer-network
+
+  # Optional: Adminer for database management UI
+  adminer:
+    image: adminer:latest
+    container_name: poker-adminer
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    networks:
+      - indexer-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  indexer-network:
+    driver: bridge
