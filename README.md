@@ -1,5 +1,7 @@
 # Poker Hand Distribution Indexer
 
+![Go](https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+
 Index poker hands from Pokerchain into PostgreSQL for statistical analysis and randomness verification.
 
 ## Overview
