@@ -25,53 +25,126 @@ A standalone Go indexer that fetches poker hand events from any Pokerchain node 
 
 ## Quick Start
 
-### 1. Start PostgreSQL
+### Prerequisites
+
+- Docker & Docker Compose
+- Go 1.22+ (for building binaries)
+- Access to a Pokerchain RPC node
+
+### Complete Setup
 
 ```bash
+# 1. Start PostgreSQL database
 docker compose up -d postgres
 
-# Optional: Start Adminer UI on port 8080
+# 2. Verify database is running
+docker compose ps
+
+# 3. (Optional) Start Adminer database UI on port 8080
 docker compose --profile tools up -d adminer
-```
 
-### 2. Start REST API (Optional)
+# 4. Build indexer
+go build -o indexer ./cmd/indexer
 
-The indexer includes a REST API for querying statistics programmatically:
+# 5. Run backfill (replace with your node URL)
+./backfill.sh http://localhost:26657
 
-```bash
-# Build the API
+# 6. (Optional) Build and start REST API
 go build -o api ./cmd/api
-
-# Run the API
 ./api
 ```
 
-API will be available at `http://localhost:8000`. See [API.md](API.md) for full documentation.
-
-### 3. Backfill Historical Blocks
+### Monitor Progress
 
 ```bash
-# Index all blocks from a node
-./backfill.sh http://localhost:26657
+# Check database is healthy
+docker compose ps
 
-# Index specific block range
-./backfill.sh http://localhost:26657 1000 5000
+# View database logs
+docker compose logs -f postgres
 
-# Use remote node
-./backfill.sh https://rpc.pokerchain.example.com
+# Check indexed hand count
+docker compose exec postgres psql -U poker -d poker_hands -c "SELECT COUNT(*) FROM poker_hands;"
+
+# Run analysis summary
+./run-analysis.sh summary
+
+# Test API (if running)
+curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/stats/summary
 ```
 
-### 4. Run Analysis
+### Stop Everything
 
 ```bash
-# Quick randomness report
-./run-analysis.sh report
+# Stop all containers
+docker compose down
 
-# Full analysis
-./run-analysis.sh full
+# Stop and remove ALL data (⚠️ deletes indexed data)
+docker compose down -v
 
-# See all commands
-./run-analysis.sh help
+# Stop API (if running in background)
+pkill -f ./api
+```
+
+## Usage Examples
+
+### Example 1: Index Local Development Node
+
+```bash
+# Start database
+docker compose up -d postgres
+
+# Build and run indexer against local node
+go build -o indexer ./cmd/indexer
+./backfill.sh http://localhost:26657
+
+# View results
+./run-analysis.sh summary
+```
+
+### Example 2: Index Production Node with API
+
+```bash
+# Start database
+docker compose up -d postgres
+
+# Index production node
+./backfill.sh https://rpc.pokerchain.io
+
+# Start REST API
+go build -o api ./cmd/api
+./api &
+
+# Query via API
+curl http://localhost:8000/api/v1/stats/summary
+curl http://localhost:8000/api/v1/analysis/randomness
+```
+
+### Example 3: Index Specific Block Range
+
+```bash
+# Index blocks 1000-5000 only
+./backfill.sh http://localhost:26657 1000 5000
+
+# Check what was indexed
+./run-analysis.sh summary
+```
+
+### Example 4: Continuous Monitoring
+
+```bash
+# Terminal 1: Run indexer continuously
+while true; do
+  ./backfill.sh http://localhost:26657
+  sleep 60  # Wait 1 minute between runs
+done
+
+# Terminal 2: Monitor database
+watch -n 5 'docker compose exec postgres psql -U poker -d poker_hands -c "SELECT COUNT(*) FROM poker_hands;"'
+
+# Terminal 3: API for real-time queries
+./api
 ```
 
 ## Backfill Script
@@ -260,7 +333,67 @@ open http://localhost:8080
 curl http://localhost:8000/api/v1/stats/summary
 ```
 
+## Verifying Setup
+
+### Check Database Connection
+
+```bash
+# Check container is running
+docker compose ps
+
+# Should show:
+# NAME                 IMAGE                  STATUS
+# poker-indexer-db     postgres:16-alpine     Up (healthy)
+
+# Test database connection
+docker compose exec postgres psql -U poker -d poker_hands -c "SELECT version();"
+
+# Check tables exist
+docker compose exec postgres psql -U poker -d poker_hands -c "\dt"
+```
+
+### Check Indexed Data
+
+```bash
+# Count total hands
+docker compose exec postgres psql -U poker -d poker_hands -c "SELECT COUNT(*) FROM poker_hands;"
+
+# View recent hands
+docker compose exec postgres psql -U poker -d poker_hands -c "SELECT game_id, hand_number, block_height FROM poker_hands ORDER BY block_height DESC LIMIT 5;"
+
+# Run analysis summary
+./run-analysis.sh summary
+```
+
+### Check API (if running)
+
+```bash
+# Test health endpoint
+curl http://localhost:8000/health
+
+# Should return:
+# {"status":"healthy","database":"connected","uptime":"..."}
+
+# Test stats endpoint
+curl http://localhost:8000/api/v1/stats/summary
+
+# View all available endpoints
+curl http://localhost:8000/api/v1/
+```
+
 ## Troubleshooting
+
+### Database not starting
+```bash
+# Check Docker is running
+docker ps
+
+# View database logs
+docker compose logs postgres
+
+# Restart database
+docker compose restart postgres
+```
 
 ### No data appearing
 1. Check that the node has poker hand events (`hand_started`, `hand_completed`)
