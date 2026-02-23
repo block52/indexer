@@ -34,7 +34,21 @@ docker compose up -d postgres
 docker compose --profile tools up -d adminer
 ```
 
-### 2. Backfill Historical Blocks
+### 2. Start REST API (Optional)
+
+The indexer includes a REST API for querying statistics programmatically:
+
+```bash
+# Build the API
+go build -o api ./cmd/api
+
+# Run the API
+./api
+```
+
+API will be available at `http://localhost:8000`. See [API.md](API.md) for full documentation.
+
+### 3. Backfill Historical Blocks
 
 ```bash
 # Index all blocks from a node
@@ -47,7 +61,7 @@ docker compose --profile tools up -d adminer
 ./backfill.sh https://rpc.pokerchain.example.com
 ```
 
-### 3. Run Analysis
+### 4. Run Analysis
 
 ```bash
 # Quick randomness report
@@ -195,6 +209,43 @@ SELECT * FROM calculate_chi_squared();
 SELECT * FROM community_card_sequences;
 ```
 
+## REST API
+
+The indexer includes a comprehensive REST API for programmatic access to statistics and analysis data.
+
+### Starting the API
+
+```bash
+# Build
+go build -o api ./cmd/api
+
+# Run
+./api
+```
+
+API available at `http://localhost:8000`
+
+### Example Requests
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Get statistics summary
+curl http://localhost:8000/api/v1/stats/summary
+
+# Get card frequency distribution
+curl http://localhost:8000/api/v1/stats/cards
+
+# Get randomness analysis
+curl http://localhost:8000/api/v1/analysis/randomness
+
+# Get player stats
+curl http://localhost:8000/api/v1/players/poker1abc.../stats
+```
+
+**Full API documentation:** See [API.md](API.md)
+
 ## Connect to Database
 
 ```bash
@@ -204,6 +255,9 @@ PGPASSWORD=poker_indexer_dev psql -h localhost -U poker -d poker_hands
 # Via Adminer UI
 open http://localhost:8080
 # Server: postgres, User: poker, Password: poker_indexer_dev, Database: poker_hands
+
+# Via REST API
+curl http://localhost:8000/api/v1/stats/summary
 ```
 
 ## Troubleshooting
