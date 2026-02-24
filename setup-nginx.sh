@@ -32,8 +32,14 @@ log_step() { echo -e "\n${CYAN}==>${NC} ${BLUE}$1${NC}\n"; }
 
 # Check if running as root, if not, re-run with sudo
 if [ "$EUID" -ne 0 ]; then
-   log_info "This script requires sudo privileges. Re-running with sudo..."
-   exec sudo bash "$0" "$@"
+   # Check if sudo is available
+   if command -v sudo &> /dev/null; then
+      log_info "This script requires root privileges. Re-running with sudo..."
+      exec sudo bash "$0" "$@"
+   else
+      log_error "This script must be run as root"
+      exit 1
+   fi
 fi
 
 # Welcome banner
