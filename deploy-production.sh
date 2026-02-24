@@ -253,7 +253,7 @@ DOCKER_EOF
     # Create Dockerfile for indexer
     log_info "Creating Dockerfile for indexer..."
     cat > Dockerfile.indexer << 'INDEXER_EOF'
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -270,7 +270,7 @@ INDEXER_EOF
     # Create Dockerfile for API
     log_info "Creating Dockerfile for API..."
     cat > Dockerfile.api << 'API_EOF'
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
