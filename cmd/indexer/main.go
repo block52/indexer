@@ -664,14 +664,15 @@ func (idx *Indexer) recordPlayerSession(attrs map[string]string, blockHeight int
 func (idx *Indexer) updateProgress(blockHeight int64) {
 	// Update every 100 blocks to reduce database writes
 	if blockHeight%100 == 0 {
+		totalBlocksScanned := blockHeight - idx.config.StartBlock + 1
 		_, err := idx.db.Exec(`
 			INSERT INTO indexing_progress (id, last_scanned_block, total_blocks_scanned, last_updated)
-			VALUES (1, $1, $1 - $2 + 1, NOW())
+			VALUES (1, $1, $2, NOW())
 			ON CONFLICT (id) DO UPDATE SET
 				last_scanned_block = EXCLUDED.last_scanned_block,
 				total_blocks_scanned = EXCLUDED.total_blocks_scanned,
 				last_updated = EXCLUDED.last_updated
-		`, blockHeight, idx.config.StartBlock)
+		`, blockHeight, totalBlocksScanned)
 		if err != nil {
 			log.Printf("Warning: failed to update progress at block %d: %v", blockHeight, err)
 		}
