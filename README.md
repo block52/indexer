@@ -317,6 +317,23 @@ GET https://indexer.block52.xyz/health
 }
 ```
 
+#### Indexing Status
+```bash
+GET https://indexer.block52.xyz/api/v1/status
+```
+**Response:**
+```json
+{
+  "total_blocks": 0,
+  "blocks_indexed": 115394,
+  "percent_complete": 0,
+  "last_block_indexed": 115394,
+  "first_block_indexed": 1,
+  "total_hands": 1523,
+  "total_games": 142
+}
+```
+
 #### Statistics Summary
 ```bash
 GET https://indexer.block52.xyz/api/v1/stats/summary

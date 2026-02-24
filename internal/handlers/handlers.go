@@ -39,6 +39,21 @@ func (h *Handler) Health(c *gin.Context) {
 	})
 }
 
+// Status returns indexing progress and statistics
+func (h *Handler) Status(c *gin.Context) {
+	status, err := h.db.GetIndexingStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Database error",
+			Message: fmt.Sprintf("failed to get status: %v", err),
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
 // GetHands returns paginated list of poker hands
 func (h *Handler) GetHands(c *gin.Context) {
 	var params models.PaginationParams

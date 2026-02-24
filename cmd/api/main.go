@@ -51,6 +51,9 @@ func main() {
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Status endpoint
+		v1.GET("/status", h.Status)
+
 		// Hand data endpoints
 		hands := v1.Group("/hands")
 		{

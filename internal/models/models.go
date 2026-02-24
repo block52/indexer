@@ -171,3 +171,16 @@ type HealthStatus struct {
 	Database string `json:"database"`
 	Uptime   string `json:"uptime"`
 }
+
+// IndexingStatus represents indexing progress and statistics
+type IndexingStatus struct {
+	TotalBlocks      int64   `json:"total_blocks"`
+	BlocksIndexed    int64   `json:"blocks_indexed"`
+	PercentComplete  float64 `json:"percent_complete"`
+	LastBlockIndexed int64   `json:"last_block_indexed"`
+	FirstBlockIndexed int64  `json:"first_block_indexed"`
+	TotalHands       int64   `json:"total_hands"`
+	TotalGames       int64   `json:"total_games"`
+	BlocksPerSecond  float64 `json:"blocks_per_second,omitempty"`
+	EstimatedTimeRemaining string `json:"estimated_time_remaining,omitempty"`
+}

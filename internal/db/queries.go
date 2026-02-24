@@ -428,3 +428,42 @@ func (db *DB) GetPlayerSessions(playerAddress string, limit, offset int) ([]mode
 
 	return sessions, total, nil
 }
+
+// GetIndexingStatus retrieves indexing progress and statistics
+func (db *DB) GetIndexingStatus() (*models.IndexingStatus, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	status := &models.IndexingStatus{}
+
+	// Get indexing progress from database
+	err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE((SELECT MAX(block_height) FROM poker_hands), 0) as last_block_indexed,
+			COALESCE((SELECT MIN(block_height) FROM poker_hands), 0) as first_block_indexed,
+			COALESCE((SELECT COUNT(*) FROM poker_hands), 0) as total_hands,
+			COALESCE((SELECT COUNT(DISTINCT game_id) FROM poker_hands), 0) as total_games
+	`).Scan(
+		&status.LastBlockIndexed,
+		&status.FirstBlockIndexed,
+		&status.TotalHands,
+		&status.TotalGames,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get indexing status: %w", err)
+	}
+
+	// Calculate blocks indexed
+	if status.LastBlockIndexed > 0 && status.FirstBlockIndexed > 0 {
+		status.BlocksIndexed = status.LastBlockIndexed - status.FirstBlockIndexed + 1
+	}
+
+	// Note: We can't determine total_blocks without querying the blockchain node
+	// This should be set by the caller if they have access to chain height
+	// For now, we'll leave it as 0 and calculate percentage as 0 if total is unknown
+	status.TotalBlocks = 0
+	status.PercentComplete = 0.0
+
+	return status, nil
+}
