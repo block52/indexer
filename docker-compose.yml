@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: poker-indexer-db
     environment:
       POSTGRES_USER: poker
@@ -24,7 +24,7 @@ services:
 
   # Optional: Adminer for database management UI
   adminer:
-    image: adminer:latest
+    image: adminer:5-standalone
     container_name: poker-adminer
     depends_on:
       - postgres

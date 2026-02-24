@@ -11,6 +11,10 @@
 *.sln.docstates
 *.env
 
+# Go binaries
+/indexer
+/api
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
