@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,13 +15,15 @@ import (
 // Handler holds dependencies for HTTP handlers
 type Handler struct {
 	db        *db.DB
+	nodeRPC   string
 	startTime time.Time
 }
 
 // NewHandler creates a new handler instance
-func NewHandler(database *db.DB) *Handler {
+func NewHandler(database *db.DB, nodeRPC string) *Handler {
 	return &Handler{
 		db:        database,
+		nodeRPC:   nodeRPC,
 		startTime: time.Now(),
 	}
 }
@@ -51,7 +54,47 @@ func (h *Handler) Status(c *gin.Context) {
 		return
 	}
 
+	// Get current chain height from RPC node
+	chainHeight, err := h.getChainHeight()
+	if err == nil && chainHeight > 0 {
+		status.TotalBlocks = chainHeight
+		// Recalculate percentage based on actual chain height
+		if chainHeight > 0 {
+			status.PercentComplete = float64(status.LastBlockIndexed) / float64(chainHeight) * 100
+		}
+	}
+
 	c.JSON(http.StatusOK, status)
+}
+
+// getChainHeight fetches the current chain height from the RPC node
+func (h *Handler) getChainHeight() (int64, error) {
+	type StatusResult struct {
+		Result struct {
+			SyncInfo struct {
+				LatestBlockHeight string `json:"latest_block_height"`
+			} `json:"sync_info"`
+		} `json:"result"`
+	}
+
+	url := fmt.Sprintf("%s/status", h.nodeRPC)
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var result StatusResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+
+	height, err := strconv.ParseInt(result.Result.SyncInfo.LatestBlockHeight, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return height, nil
 }
 
 // GetHands returns paginated list of poker hands

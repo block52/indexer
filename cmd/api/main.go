@@ -43,7 +43,7 @@ func main() {
 	router.Use(cors.New(corsConfig))
 
 	// Create handlers
-	h := handlers.NewHandler(database)
+	h := handlers.NewHandler(database, cfg.NodeRPC)
 
 	// Health check
 	router.GET("/health", h.Health)
@@ -105,6 +105,7 @@ type Config struct {
 	Port        string
 	Environment string
 	CORSOrigins []string
+	NodeRPC     string
 	DB          db.Config
 }
 
@@ -114,6 +115,7 @@ func loadConfig() Config {
 		Port:        getEnv("API_PORT", "8000"),
 		Environment: getEnv("ENVIRONMENT", "development"),
 		CORSOrigins: []string{getEnv("CORS_ORIGINS", "*")},
+		NodeRPC:     getEnv("NODE_RPC", "http://localhost:26657"),
 		DB: db.Config{
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnvInt("DB_PORT", 5432),
