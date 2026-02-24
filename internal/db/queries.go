@@ -436,15 +436,19 @@ func (db *DB) GetIndexingStatus() (*models.IndexingStatus, error) {
 
 	status := &models.IndexingStatus{}
 
-	// Get indexing progress from database
+	// Get indexing progress from progress table and poker hands
 	err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE((SELECT MAX(block_height) FROM poker_hands), 0) as last_block_indexed,
-			COALESCE((SELECT MIN(block_height) FROM poker_hands), 0) as first_block_indexed,
+			COALESCE((SELECT last_scanned_block FROM indexing_progress WHERE id = 1), 0) as last_scanned,
+			COALESCE((SELECT total_blocks_scanned FROM indexing_progress WHERE id = 1), 0) as total_scanned,
+			COALESCE((SELECT MAX(block_height) FROM poker_hands), 0) as last_block_with_hand,
+			COALESCE((SELECT MIN(block_height) FROM poker_hands), 0) as first_block_with_hand,
 			COALESCE((SELECT COUNT(*) FROM poker_hands), 0) as total_hands,
 			COALESCE((SELECT COUNT(DISTINCT game_id) FROM poker_hands), 0) as total_games
 	`).Scan(
 		&status.LastBlockIndexed,
+		&status.BlocksIndexed,
+		&status.TotalBlocks, // Temporarily using this for last block with hand
 		&status.FirstBlockIndexed,
 		&status.TotalHands,
 		&status.TotalGames,
@@ -454,16 +458,13 @@ func (db *DB) GetIndexingStatus() (*models.IndexingStatus, error) {
 		return nil, fmt.Errorf("failed to get indexing status: %w", err)
 	}
 
-	// Calculate blocks indexed
-	if status.LastBlockIndexed > 0 && status.FirstBlockIndexed > 0 {
-		status.BlocksIndexed = status.LastBlockIndexed - status.FirstBlockIndexed + 1
+	// Calculate percentage (blocks scanned vs last scanned block)
+	if status.LastBlockIndexed > 0 {
+		status.PercentComplete = float64(status.BlocksIndexed) / float64(status.LastBlockIndexed) * 100
 	}
 
-	// Note: We can't determine total_blocks without querying the blockchain node
-	// This should be set by the caller if they have access to chain height
-	// For now, we'll leave it as 0 and calculate percentage as 0 if total is unknown
+	// TotalBlocks will be set to 0 (we don't know total chain height from DB)
 	status.TotalBlocks = 0
-	status.PercentComplete = 0.0
 
 	return status, nil
 }

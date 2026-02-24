@@ -237,6 +237,9 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			continue
 		}
 
+		// Update progress tracking after each block
+		idx.updateProgress(height)
+
 		for _, event := range events {
 			// Handle new event types (v0.1.33+)
 			if event.Type == "hand_started" || event.Type == "hand_completed" {
@@ -654,5 +657,20 @@ func (idx *Indexer) recordPlayerSession(attrs map[string]string, blockHeight int
 			SET leave_block = $1, cash_out_amount = $2
 			WHERE player_address = $3 AND game_id = $4 AND leave_block IS NULL
 		`, blockHeight, refund, player, gameID)
+	}
+}
+
+// updateProgress updates the indexing progress in the database
+func (idx *Indexer) updateProgress(blockHeight int64) {
+	// Update every 100 blocks to reduce database writes
+	if blockHeight%100 == 0 {
+		idx.db.Exec(`
+			INSERT INTO indexing_progress (id, last_scanned_block, total_blocks_scanned, last_updated)
+			VALUES (1, $1, $1 - $2 + 1, NOW())
+			ON CONFLICT (id) DO UPDATE SET
+				last_scanned_block = EXCLUDED.last_scanned_block,
+				total_blocks_scanned = EXCLUDED.total_blocks_scanned,
+				last_updated = EXCLUDED.last_updated
+		`, blockHeight, idx.config.StartBlock)
 	}
 }
