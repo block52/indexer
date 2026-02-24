@@ -306,8 +306,9 @@ The API is available at: **https://indexer.block52.xyz**
 
 #### Health Check
 ```bash
-GET /health
+GET https://indexer.block52.xyz/health
 ```
+**Response:**
 ```json
 {
   "status": "healthy",
@@ -318,8 +319,9 @@ GET /health
 
 #### Statistics Summary
 ```bash
-GET /api/v1/stats/summary
+GET https://indexer.block52.xyz/api/v1/stats/summary
 ```
+**Response:**
 ```json
 {
   "total_hands": 1523,
@@ -335,8 +337,9 @@ GET /api/v1/stats/summary
 
 #### Card Frequency Distribution
 ```bash
-GET /api/v1/stats/cards
+GET https://indexer.block52.xyz/api/v1/stats/cards
 ```
+**Response:**
 ```json
 {
   "cards": [
@@ -348,6 +351,15 @@ GET /api/v1/stats/cards
       "expected_frequency": 0.0192,
       "actual_frequency": 0.0193,
       "deviation": 0.0001
+    },
+    {
+      "card": "Kh",
+      "rank": "K",
+      "suit": "h",
+      "total_appearances": 145,
+      "expected_frequency": 0.0192,
+      "actual_frequency": 0.0190,
+      "deviation": -0.0002
     }
   ],
   "total_cards": 7615,
@@ -357,8 +369,9 @@ GET /api/v1/stats/cards
 
 #### Randomness Analysis
 ```bash
-GET /api/v1/analysis/randomness
+GET https://indexer.block52.xyz/api/v1/analysis/randomness
 ```
+**Response:**
 ```json
 {
   "chi_squared_test": {
@@ -375,8 +388,9 @@ GET /api/v1/analysis/randomness
 
 #### Suit Distribution
 ```bash
-GET /api/v1/stats/suits
+GET https://indexer.block52.xyz/api/v1/stats/suits
 ```
+**Response:**
 ```json
 {
   "suits": [
@@ -396,8 +410,9 @@ GET /api/v1/stats/suits
 
 #### Rank Distribution
 ```bash
-GET /api/v1/stats/ranks
+GET https://indexer.block52.xyz/api/v1/stats/ranks
 ```
+**Response:**
 ```json
 {
   "ranks": [
@@ -417,8 +432,9 @@ GET /api/v1/stats/ranks
 
 #### Player Statistics
 ```bash
-GET /api/v1/players/{address}/stats
+GET https://indexer.block52.xyz/api/v1/players/{address}/stats
 ```
+**Response:**
 ```json
 {
   "player_address": "poker1abc...",
@@ -435,8 +451,9 @@ GET /api/v1/players/{address}/stats
 
 #### Player Sessions
 ```bash
-GET /api/v1/players/{address}/sessions
+GET https://indexer.block52.xyz/api/v1/players/{address}/sessions
 ```
+**Response:**
 ```json
 {
   "sessions": [
@@ -457,8 +474,9 @@ GET /api/v1/players/{address}/sessions
 
 #### Outlier Cards
 ```bash
-GET /api/v1/analysis/outliers
+GET https://indexer.block52.xyz/api/v1/analysis/outliers
 ```
+**Response:**
 ```json
 {
   "outliers": [
