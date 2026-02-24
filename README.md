@@ -298,23 +298,180 @@ go build -o api ./cmd/api
 
 API available at `http://localhost:8000`
 
-### Example Requests
+### Production API
 
+The API is available at: **https://indexer.block52.xyz**
+
+### API Endpoints & Response Shapes
+
+#### Health Check
 ```bash
-# Health check
-curl http://localhost:8000/health
+GET /health
+```
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "uptime": "1h23m45s"
+}
+```
 
-# Get statistics summary
-curl http://localhost:8000/api/v1/stats/summary
+#### Statistics Summary
+```bash
+GET /api/v1/stats/summary
+```
+```json
+{
+  "total_hands": 1523,
+  "total_cards_revealed": 7615,
+  "unique_cards": 52,
+  "total_games": 142,
+  "block_range": {
+    "min": 1,
+    "max": 45892
+  }
+}
+```
 
-# Get card frequency distribution
-curl http://localhost:8000/api/v1/stats/cards
+#### Card Frequency Distribution
+```bash
+GET /api/v1/stats/cards
+```
+```json
+{
+  "cards": [
+    {
+      "card": "As",
+      "rank": "A",
+      "suit": "s",
+      "total_appearances": 147,
+      "expected_frequency": 0.0192,
+      "actual_frequency": 0.0193,
+      "deviation": 0.0001
+    }
+  ],
+  "total_cards": 7615,
+  "unique_cards": 52
+}
+```
 
-# Get randomness analysis
-curl http://localhost:8000/api/v1/analysis/randomness
+#### Randomness Analysis
+```bash
+GET /api/v1/analysis/randomness
+```
+```json
+{
+  "chi_squared_test": {
+    "chi_squared": 51.23,
+    "degrees_of_freedom": 51,
+    "p_value": 0.47,
+    "result": "PASS",
+    "interpretation": "Distribution is consistent with random"
+  },
+  "total_cards": 7615,
+  "expected_per_card": 146.44
+}
+```
 
-# Get player stats
-curl http://localhost:8000/api/v1/players/poker1abc.../stats
+#### Suit Distribution
+```bash
+GET /api/v1/stats/suits
+```
+```json
+{
+  "suits": [
+    {
+      "suit": "hearts",
+      "symbol": "h",
+      "total_appearances": 1904,
+      "expected_frequency": 0.25,
+      "actual_frequency": 0.2501,
+      "deviation": 0.0001
+    }
+  ],
+  "chi_squared": 0.42,
+  "p_value": 0.94
+}
+```
+
+#### Rank Distribution
+```bash
+GET /api/v1/stats/ranks
+```
+```json
+{
+  "ranks": [
+    {
+      "rank": "A",
+      "name": "Ace",
+      "total_appearances": 585,
+      "expected_frequency": 0.0769,
+      "actual_frequency": 0.0768,
+      "deviation": -0.0001
+    }
+  ],
+  "chi_squared": 5.67,
+  "p_value": 0.89
+}
+```
+
+#### Player Statistics
+```bash
+GET /api/v1/players/{address}/stats
+```
+```json
+{
+  "player_address": "poker1abc...",
+  "total_hands": 42,
+  "hands_won": 18,
+  "win_rate": 0.4286,
+  "total_wagered": "1250000",
+  "total_won": "2100000",
+  "net_profit": "850000",
+  "best_hand": "Royal Flush",
+  "games_played": 8
+}
+```
+
+#### Player Sessions
+```bash
+GET /api/v1/players/{address}/sessions
+```
+```json
+{
+  "sessions": [
+    {
+      "game_id": "game_123",
+      "hands_played": 12,
+      "hands_won": 5,
+      "total_wagered": "150000",
+      "total_won": "280000",
+      "net_profit": "130000",
+      "start_block": 1000,
+      "end_block": 1200
+    }
+  ],
+  "total_sessions": 8
+}
+```
+
+#### Outlier Cards
+```bash
+GET /api/v1/analysis/outliers
+```
+```json
+{
+  "outliers": [
+    {
+      "card": "7d",
+      "total_appearances": 132,
+      "expected": 146.44,
+      "deviation": -0.0983,
+      "deviation_percentage": -9.83
+    }
+  ],
+  "threshold": 0.01
+}
 ```
 
 **Full API documentation:** See [API.md](API.md)
