@@ -226,7 +226,7 @@ services:
     restart: always
     networks:
       - indexer-network
-    command: ["-node", "${NODE_RPC}", "-api", "${NODE_API}", "-start", "1", "-end", "0"]
+    command: ["-node", "${NODE_RPC}", "-api", "${NODE_API}", "-start", "1", "-end", "0", "-db-host", "postgres", "-db-user", "poker", "-db-pass", "${DB_PASSWORD}", "-db-name", "poker_hands"]
 
   api:
     build:
