@@ -30,10 +30,10 @@ log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "\n${CYAN}==>${NC} ${BLUE}$1${NC}\n"; }
 
-# Check if running as root
+# Check if running as root, if not, re-run with sudo
 if [ "$EUID" -ne 0 ]; then
-   log_error "Please run as root or with sudo"
-   exit 1
+   log_info "This script requires sudo privileges. Re-running with sudo..."
+   exec sudo bash "$0" "$@"
 fi
 
 # Welcome banner
