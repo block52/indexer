@@ -179,6 +179,55 @@ The `backfill.sh` script handles everything:
 DB_HOST=db.example.com DB_PASS=secret ./backfill.sh http://localhost:26657
 ```
 
+## Continuous Indexing (Cron)
+
+The indexer is a one-time backfill tool that exits after processing blocks. For continuous indexing, use the cron setup script:
+
+```bash
+./setup-cron.sh http://node1.block52.xyz:26657
+```
+
+This will:
+- Create a wrapper script that automatically resumes from the last indexed block
+- Set up a cron job to run every 5 minutes (configurable)
+- Create a logs directory with daily log files
+- Auto-cleanup logs older than 30 days
+
+**Cron Management:**
+
+```bash
+# View cron jobs
+crontab -l
+
+# View today's indexer log
+tail -f logs/indexer-$(date +%Y%m%d).log
+
+# View all logs
+ls -lh logs/
+
+# Remove cron job
+crontab -l | grep -v 'run-indexer-cron.sh' | crontab -
+
+# Run indexer manually
+./run-indexer-cron.sh
+```
+
+**How it works:**
+1. Queries database for last indexed block
+2. Runs indexer from `last_block + 1` to latest
+3. Logs output to daily log file
+4. Runs every N minutes via cron
+
+**Production Setup:**
+```bash
+# On production server
+cd poker-indexer
+./setup-cron.sh http://node1.block52.xyz:26657
+
+# Monitor logs
+tail -f logs/indexer-$(date +%Y%m%d).log
+```
+
 ## Direct Indexer Usage
 
 You can also run the indexer directly:
