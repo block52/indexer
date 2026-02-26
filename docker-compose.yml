@@ -22,6 +22,36 @@ services:
     networks:
       - indexer-network
 
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile.indexer
+    container_name: poker-indexer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - -continuous
+      - -node
+      - ${NODE_RPC:-http://node1.block52.xyz:26657}
+      - -db-host
+      - postgres
+      - -db-port
+      - "5432"
+      - -db-user
+      - poker
+      - -db-pass
+      - poker_indexer_dev
+      - -db-name
+      - poker_hands
+      - -start
+      - "${START_BLOCK:-1}"
+      - -loop-delay
+      - "${LOOP_DELAY:-60}"
+    restart: unless-stopped
+    networks:
+      - indexer-network
+
   # Optional: Adminer for database management UI
   adminer:
     image: adminer:5-standalone

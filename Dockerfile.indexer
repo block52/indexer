@@ -1,0 +1,23 @@
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN go build -o indexer ./cmd/indexer
+
+FROM alpine:latest
+
+RUN apk add --no-cache bash
+
+WORKDIR /app
+
+COPY --from=builder /build/indexer /app/indexer
+
+RUN chmod +x /app/indexer
+
+ENTRYPOINT ["/app/indexer"]
+CMD ["-continuous"]

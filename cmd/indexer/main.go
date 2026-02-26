@@ -125,6 +125,8 @@ func main() {
 	startBlock := flag.Int64("start", 1, "Start block height")
 	endBlock := flag.Int64("end", 0, "End block height (0 = latest)")
 	batchSize := flag.Int("batch", 100, "Blocks per batch")
+	continuous := flag.Bool("continuous", false, "Run continuously, resuming from last indexed block")
+	loopDelay := flag.Int("loop-delay", 60, "Seconds to wait between indexing runs in continuous mode")
 
 	flag.Parse()
 
@@ -186,13 +188,78 @@ func main() {
 	log.Printf("Using RPC: %s", config.NodeRPC)
 	log.Printf("Using API: %s", config.NodeAPI)
 
-	// Run indexer
-	indexer := NewIndexer(db, config)
-	if err := indexer.Run(context.Background()); err != nil {
-		log.Fatalf("Indexer failed: %v", err)
+	if *continuous {
+		log.Println("Running in continuous mode...")
+		runContinuous(db, config, *loopDelay)
+	} else {
+		// Run indexer once
+		indexer := NewIndexer(db, config)
+		if err := indexer.Run(context.Background()); err != nil {
+			log.Fatalf("Indexer failed: %v", err)
+		}
+		log.Println("Indexing complete!")
 	}
+}
 
-	log.Println("Indexing complete!")
+// runContinuous runs the indexer in a continuous loop
+func runContinuous(db *sql.DB, baseConfig Config, loopDelay int) {
+	for {
+		log.Println("========================================")
+		log.Printf("Starting indexing run at %s", time.Now().Format(time.RFC3339))
+		log.Println("========================================")
+
+		// Get the last indexed block from database
+		var lastBlock int64
+		err := db.QueryRow("SELECT COALESCE(MAX(block_height), 0) FROM poker_hands").Scan(&lastBlock)
+		if err != nil {
+			log.Printf("Warning: failed to get last indexed block: %v", err)
+			lastBlock = 0
+		}
+
+		// Determine start block
+		startBlock := lastBlock + 1
+		if lastBlock == 0 {
+			startBlock = baseConfig.StartBlock
+			log.Printf("No blocks indexed yet, starting from block %d", startBlock)
+		} else {
+			log.Printf("Continuing from block %d (last indexed: %d)", startBlock, lastBlock)
+		}
+
+		// Get latest block height
+		latestBlock, err := getLatestBlockHeight(baseConfig.NodeRPC)
+		if err != nil {
+			log.Printf("Error: failed to get latest block height: %v", err)
+			log.Printf("Retrying in %d seconds...", loopDelay)
+			time.Sleep(time.Duration(loopDelay) * time.Second)
+			continue
+		}
+
+		// Check if we're caught up
+		if startBlock > latestBlock {
+			log.Printf("Already caught up! Current block: %d, Latest block: %d", lastBlock, latestBlock)
+			log.Printf("Waiting %d seconds for new blocks...", loopDelay)
+			time.Sleep(time.Duration(loopDelay) * time.Second)
+			continue
+		}
+
+		// Create config for this run
+		config := baseConfig
+		config.StartBlock = startBlock
+		config.EndBlock = latestBlock
+
+		// Run indexer
+		indexer := NewIndexer(db, config)
+		if err := indexer.Run(context.Background()); err != nil {
+			log.Printf("Error: indexing failed: %v", err)
+			log.Printf("Retrying in %d seconds...", loopDelay)
+			time.Sleep(time.Duration(loopDelay) * time.Second)
+			continue
+		}
+
+		log.Printf("Indexing run completed at %s", time.Now().Format(time.RFC3339))
+		log.Printf("Waiting %d seconds before next run...", loopDelay)
+		time.Sleep(time.Duration(loopDelay) * time.Second)
+	}
 }
 
 // Indexer handles block indexing
