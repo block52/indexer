@@ -22,7 +22,7 @@ func (db *DB) GetHands(limit, offset int, gameID string, startBlock, endBlock in
 	defer cancel()
 
 	// Build query with optional filters
-	query := `SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, created_at
+	query := `SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, indexed_at
 	          FROM poker_hands WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM poker_hands WHERE 1=1`
 	args := []interface{}{}
@@ -84,7 +84,7 @@ func (db *DB) GetHandDetails(gameID string, handNumber int) (*models.HandDetails
 
 	// Get hand info
 	err := db.QueryRowContext(ctx, `
-		SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, created_at
+		SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, indexed_at
 		FROM poker_hands
 		WHERE game_id = $1 AND hand_number = $2
 	`, gameID, handNumber).Scan(
@@ -101,7 +101,7 @@ func (db *DB) GetHandDetails(gameID string, handNumber int) (*models.HandDetails
 	// Get result if available
 	var result models.HandResult
 	err = db.QueryRowContext(ctx, `
-		SELECT game_id, hand_number, block_height, community_cards, winner_count, tx_hash, created_at
+		SELECT game_id, hand_number, block_height, community_cards, winner_count, tx_hash, indexed_at
 		FROM hand_results
 		WHERE game_id = $1 AND hand_number = $2
 	`, gameID, handNumber).Scan(
@@ -116,7 +116,7 @@ func (db *DB) GetHandDetails(gameID string, handNumber int) (*models.HandDetails
 
 	// Get revealed cards
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, game_id, hand_number, block_height, card, card_type, position, created_at
+		SELECT id, game_id, hand_number, block_height, card, card_type, position, indexed_at
 		FROM revealed_cards
 		WHERE game_id = $1 AND hand_number = $2
 		ORDER BY card_type, position
@@ -143,7 +143,7 @@ func (db *DB) GetRevealedCards(gameID string, handNumber int) ([]models.Revealed
 	defer cancel()
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, game_id, hand_number, block_height, card, card_type, position, created_at
+		SELECT id, game_id, hand_number, block_height, card, card_type, position, indexed_at
 		FROM revealed_cards
 		WHERE game_id = $1 AND hand_number = $2
 		ORDER BY card_type DESC, position
@@ -179,8 +179,8 @@ func (db *DB) GetStatsSummary() (*models.StatsSummary, error) {
 			(SELECT COUNT(*) FROM revealed_cards) as total_revealed_cards,
 			(SELECT COUNT(DISTINCT game_id) FROM poker_hands) as unique_games,
 			(SELECT CONCAT(MIN(block_height), '-', MAX(block_height)) FROM poker_hands) as block_range,
-			(SELECT MIN(created_at) FROM poker_hands) as first_indexed,
-			(SELECT MAX(created_at) FROM poker_hands) as last_indexed
+			(SELECT MIN(indexed_at) FROM poker_hands) as first_indexed,
+			(SELECT MAX(indexed_at) FROM poker_hands) as last_indexed
 	`).Scan(
 		&summary.TotalHands,
 		&summary.TotalCompletedHands,
@@ -406,7 +406,7 @@ func (db *DB) GetPlayerSessions(playerAddress string, limit, offset int) ([]mode
 
 	// Get paginated sessions
 	rows, err := db.QueryContext(ctx, `
-		SELECT player_address, game_id, join_block, leave_block, buy_in_amount, cash_out_amount, created_at
+		SELECT player_address, game_id, join_block, leave_block, buy_in_amount, cash_out_amount, indexed_at
 		FROM player_sessions
 		WHERE player_address = $1
 		ORDER BY join_block DESC
