@@ -84,13 +84,13 @@ type ChiSquaredResult struct {
 
 // StatsSummary represents overall statistics
 type StatsSummary struct {
-	TotalHands         int64     `json:"total_hands"`
-	TotalCompletedHands int64    `json:"total_completed_hands"`
-	TotalRevealedCards int64     `json:"total_revealed_cards"`
-	UniqueGames        int64     `json:"unique_games"`
-	BlockHeightRange   string    `json:"block_height_range"`
-	FirstIndexedAt     time.Time `json:"first_indexed_at,omitempty"`
-	LastIndexedAt      time.Time `json:"last_indexed_at,omitempty"`
+	TotalHands         int64      `json:"total_hands"`
+	TotalCompletedHands int64     `json:"total_completed_hands"`
+	TotalRevealedCards int64      `json:"total_revealed_cards"`
+	UniqueGames        int64      `json:"unique_games"`
+	BlockHeightRange   *string    `json:"block_height_range,omitempty"`
+	FirstIndexedAt     *time.Time `json:"first_indexed_at,omitempty"`
+	LastIndexedAt      *time.Time `json:"last_indexed_at,omitempty"`
 }
 
 // RandomnessReport represents a comprehensive randomness analysis
