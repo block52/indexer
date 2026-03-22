@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lib/pq"
 )
@@ -682,12 +683,18 @@ func getLatestBlockHeight(nodeRPC string) (int64, error) {
 }
 
 // decodeIfBase64 attempts to decode a base64 string, returns original if not base64
+// Only returns decoded value if it's valid UTF-8
 func decodeIfBase64(s string) string {
 	decoded, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return s
 	}
-	return string(decoded)
+	// Only use decoded value if it's valid UTF-8
+	str := string(decoded)
+	if !utf8.ValidString(str) {
+		return s
+	}
+	return str
 }
 
 // recordPlayerAction stores a player action for stats tracking
