@@ -51,39 +51,64 @@ ORDER BY ABS(deviation_percentage) DESC;
 -- Query: SELECT * FROM suit_distribution;
 
 -- Chi-squared for suits
+-- Returns columns matching Go ChiSquaredResult struct
 CREATE OR REPLACE FUNCTION suit_chi_squared()
 RETURNS TABLE(
     chi_squared NUMERIC,
     degrees_of_freedom INTEGER,
+    p_value NUMERIC,
+    result TEXT,
     interpretation TEXT
 ) AS $$
 DECLARE
     total_cards BIGINT;
     expected_per_suit NUMERIC;
+    chi_sq_value NUMERIC;
 BEGIN
     SELECT COUNT(*) INTO total_cards FROM revealed_cards;
 
     IF total_cards = 0 THEN
-        RETURN QUERY SELECT 0::NUMERIC, 3, 'No data'::TEXT;
+        RETURN QUERY SELECT
+            0::NUMERIC,
+            3,
+            0::NUMERIC,
+            'NO_DATA'::TEXT,
+            'No card data available for analysis'::TEXT;
         RETURN;
     END IF;
 
     expected_per_suit := total_cards::NUMERIC / 4;
 
-    RETURN QUERY
-    SELECT
-        SUM(POWER(total_appearances - expected_per_suit, 2) / expected_per_suit)::NUMERIC,
-        3,
-        CASE
-            WHEN SUM(POWER(total_appearances - expected_per_suit, 2) / expected_per_suit) < 7.81
-            THEN 'PASS (p > 0.05) - Suits are uniformly distributed'
-            ELSE 'FAIL (p < 0.05) - Suit distribution may be biased'
-        END
+    -- Calculate chi-squared value
+    SELECT SUM(POWER(total_appearances - expected_per_suit, 2) / expected_per_suit)
+    INTO chi_sq_value
     FROM (
         SELECT suit, SUM(total_appearances) as total_appearances
         FROM card_distribution_stats
         GROUP BY suit
     ) s;
+
+    -- Chi-squared for suits (3 degrees of freedom)
+    -- Critical values: df=3, p=0.05: 7.81, p=0.01: 11.34
+    RETURN QUERY
+    SELECT
+        chi_sq_value,
+        3,
+        CASE
+            WHEN chi_sq_value < 7.81 THEN 0.10
+            WHEN chi_sq_value < 11.34 THEN 0.03
+            ELSE 0.005
+        END::NUMERIC,
+        CASE
+            WHEN chi_sq_value < 7.81 THEN 'PASS'
+            WHEN chi_sq_value < 11.34 THEN 'MARGINAL'
+            ELSE 'FAIL'
+        END::TEXT,
+        CASE
+            WHEN chi_sq_value < 7.81 THEN 'Suits are uniformly distributed (p > 0.05)'
+            WHEN chi_sq_value < 11.34 THEN 'Suit distribution shows slight deviation (0.01 < p < 0.05)'
+            ELSE 'Suit distribution may be biased (p < 0.01)'
+        END::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -95,39 +120,64 @@ $$ LANGUAGE plpgsql;
 -- Query: SELECT * FROM rank_distribution;
 
 -- Chi-squared for ranks
+-- Returns columns matching Go ChiSquaredResult struct
 CREATE OR REPLACE FUNCTION rank_chi_squared()
 RETURNS TABLE(
     chi_squared NUMERIC,
     degrees_of_freedom INTEGER,
+    p_value NUMERIC,
+    result TEXT,
     interpretation TEXT
 ) AS $$
 DECLARE
     total_cards BIGINT;
     expected_per_rank NUMERIC;
+    chi_sq_value NUMERIC;
 BEGIN
     SELECT COUNT(*) INTO total_cards FROM revealed_cards;
 
     IF total_cards = 0 THEN
-        RETURN QUERY SELECT 0::NUMERIC, 12, 'No data'::TEXT;
+        RETURN QUERY SELECT
+            0::NUMERIC,
+            12,
+            0::NUMERIC,
+            'NO_DATA'::TEXT,
+            'No card data available for analysis'::TEXT;
         RETURN;
     END IF;
 
     expected_per_rank := total_cards::NUMERIC / 13;
 
-    RETURN QUERY
-    SELECT
-        SUM(POWER(total_appearances - expected_per_rank, 2) / expected_per_rank)::NUMERIC,
-        12,
-        CASE
-            WHEN SUM(POWER(total_appearances - expected_per_rank, 2) / expected_per_rank) < 21.03
-            THEN 'PASS (p > 0.05) - Ranks are uniformly distributed'
-            ELSE 'FAIL (p < 0.05) - Rank distribution may be biased'
-        END
+    -- Calculate chi-squared value
+    SELECT SUM(POWER(total_appearances - expected_per_rank, 2) / expected_per_rank)
+    INTO chi_sq_value
     FROM (
         SELECT rank, SUM(total_appearances) as total_appearances
         FROM card_distribution_stats
         GROUP BY rank
     ) r;
+
+    -- Chi-squared for ranks (12 degrees of freedom)
+    -- Critical values: df=12, p=0.05: 21.03, p=0.01: 26.22
+    RETURN QUERY
+    SELECT
+        chi_sq_value,
+        12,
+        CASE
+            WHEN chi_sq_value < 21.03 THEN 0.10
+            WHEN chi_sq_value < 26.22 THEN 0.03
+            ELSE 0.005
+        END::NUMERIC,
+        CASE
+            WHEN chi_sq_value < 21.03 THEN 'PASS'
+            WHEN chi_sq_value < 26.22 THEN 'MARGINAL'
+            ELSE 'FAIL'
+        END::TEXT,
+        CASE
+            WHEN chi_sq_value < 21.03 THEN 'Ranks are uniformly distributed (p > 0.05)'
+            WHEN chi_sq_value < 26.22 THEN 'Rank distribution shows slight deviation (0.01 < p < 0.05)'
+            ELSE 'Rank distribution may be biased (p < 0.01)'
+        END::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 

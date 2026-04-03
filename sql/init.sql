@@ -202,45 +202,61 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Function to calculate chi-squared statistic for randomness test
+-- Returns columns matching Go ChiSquaredResult struct
 CREATE OR REPLACE FUNCTION calculate_chi_squared()
 RETURNS TABLE(
-    test_name TEXT,
     chi_squared NUMERIC,
     degrees_of_freedom INTEGER,
-    total_observations BIGINT,
-    p_value_hint TEXT
+    p_value NUMERIC,
+    result TEXT,
+    interpretation TEXT
 ) AS $$
 DECLARE
     total_cards BIGINT;
     expected_per_card NUMERIC;
+    chi_sq_value NUMERIC;
 BEGIN
     SELECT COUNT(*) INTO total_cards FROM revealed_cards;
 
     IF total_cards = 0 THEN
         RETURN QUERY SELECT
-            'Card Distribution'::TEXT,
             0::NUMERIC,
             51,
-            0::BIGINT,
-            'No data'::TEXT;
+            0::NUMERIC,
+            'NO_DATA'::TEXT,
+            'No card data available for analysis'::TEXT;
         RETURN;
     END IF;
 
     expected_per_card := total_cards::NUMERIC / 52;
 
+    -- Calculate chi-squared value
+    SELECT SUM(POWER(total_appearances - expected_per_card, 2) / expected_per_card)
+    INTO chi_sq_value
+    FROM card_distribution_stats;
+
     -- Chi-squared for individual cards (51 degrees of freedom)
+    -- Critical values: df=51, p=0.05: 68.67, p=0.01: 76.15
     RETURN QUERY
     SELECT
-        'Card Distribution'::TEXT as test_name,
-        SUM(POWER(total_appearances - expected_per_card, 2) / expected_per_card)::NUMERIC as chi_squared,
-        51 as degrees_of_freedom,
-        total_cards,
+        chi_sq_value,
+        51,
+        -- Approximate p-value based on critical values
         CASE
-            WHEN SUM(POWER(total_appearances - expected_per_card, 2) / expected_per_card) < 68.67 THEN 'PASS (p > 0.05)'
-            WHEN SUM(POWER(total_appearances - expected_per_card, 2) / expected_per_card) < 76.15 THEN 'MARGINAL (0.01 < p < 0.05)'
-            ELSE 'FAIL (p < 0.01) - Non-random distribution detected'
-        END as p_value_hint
-    FROM card_distribution_stats;
+            WHEN chi_sq_value < 68.67 THEN 0.10  -- p > 0.05, roughly estimate as 0.10
+            WHEN chi_sq_value < 76.15 THEN 0.03  -- 0.01 < p < 0.05, estimate as 0.03
+            ELSE 0.005  -- p < 0.01, estimate as 0.005
+        END::NUMERIC,
+        CASE
+            WHEN chi_sq_value < 68.67 THEN 'PASS'
+            WHEN chi_sq_value < 76.15 THEN 'MARGINAL'
+            ELSE 'FAIL'
+        END::TEXT,
+        CASE
+            WHEN chi_sq_value < 68.67 THEN 'Card distribution is consistent with random shuffling (p > 0.05)'
+            WHEN chi_sq_value < 76.15 THEN 'Card distribution shows slight deviation from expected (0.01 < p < 0.05)'
+            ELSE 'Card distribution shows significant deviation from expected (p < 0.01) - Non-random distribution detected'
+        END::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 

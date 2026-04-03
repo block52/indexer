@@ -298,6 +298,48 @@ func (db *DB) GetChiSquaredTest() (*models.ChiSquaredResult, error) {
 	return result, nil
 }
 
+// GetSuitChiSquaredTest retrieves chi-squared test results for suit distribution
+func (db *DB) GetSuitChiSquaredTest() (*models.ChiSquaredResult, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	result := &models.ChiSquaredResult{}
+	err := db.QueryRowContext(ctx, `SELECT * FROM suit_chi_squared()`).Scan(
+		&result.ChiSquared,
+		&result.DegreesOfFreedom,
+		&result.PValue,
+		&result.Result,
+		&result.Interpretation,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get suit chi-squared test: %w", err)
+	}
+
+	return result, nil
+}
+
+// GetRankChiSquaredTest retrieves chi-squared test results for rank distribution
+func (db *DB) GetRankChiSquaredTest() (*models.ChiSquaredResult, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	result := &models.ChiSquaredResult{}
+	err := db.QueryRowContext(ctx, `SELECT * FROM rank_chi_squared()`).Scan(
+		&result.ChiSquared,
+		&result.DegreesOfFreedom,
+		&result.PValue,
+		&result.Result,
+		&result.Interpretation,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rank chi-squared test: %w", err)
+	}
+
+	return result, nil
+}
+
 // GetOutlierCards retrieves cards with significant deviation
 func (db *DB) GetOutlierCards(threshold float64) ([]models.CardStats, error) {
 	ctx, cancel := getContext()

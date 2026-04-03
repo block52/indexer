@@ -361,10 +361,22 @@ func (h *Handler) GetRandomnessReport(c *gin.Context) {
 	}
 	report.Summary = *summary
 
-	// Get chi-squared test
+	// Get card chi-squared test
 	chiSquared, err := h.db.GetChiSquaredTest()
 	if err == nil {
 		report.CardChiSquared = *chiSquared
+	}
+
+	// Get suit chi-squared test
+	suitChiSquared, err := h.db.GetSuitChiSquaredTest()
+	if err == nil {
+		report.SuitChiSquared = *suitChiSquared
+	}
+
+	// Get rank chi-squared test
+	rankChiSquared, err := h.db.GetRankChiSquaredTest()
+	if err == nil {
+		report.RankChiSquared = *rankChiSquared
 	}
 
 	// Get outlier cards
