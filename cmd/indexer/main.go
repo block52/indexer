@@ -209,12 +209,16 @@ func runContinuous(db *sql.DB, baseConfig Config, loopDelay int) {
 		log.Printf("Starting indexing run at %s", time.Now().Format(time.RFC3339))
 		log.Println("========================================")
 
-		// Get the last indexed block from database
+		// Get the last scanned block from indexing_progress (tracks all scanned blocks, not just those with hands)
 		var lastBlock int64
-		err := db.QueryRow("SELECT COALESCE(MAX(block_height), 0) FROM poker_hands").Scan(&lastBlock)
+		err := db.QueryRow("SELECT COALESCE(last_scanned_block, 0) FROM indexing_progress WHERE id = 1").Scan(&lastBlock)
 		if err != nil {
-			log.Printf("Warning: failed to get last indexed block: %v", err)
-			lastBlock = 0
+			// Fall back to poker_hands if indexing_progress is empty
+			err = db.QueryRow("SELECT COALESCE(MAX(block_height), 0) FROM poker_hands").Scan(&lastBlock)
+			if err != nil {
+				log.Printf("Warning: failed to get last indexed block: %v", err)
+				lastBlock = 0
+			}
 		}
 
 		// Determine start block
@@ -379,6 +383,9 @@ func (idx *Indexer) Run(ctx context.Context) error {
 				time.Duration(remaining*float64(time.Second)).Round(time.Second))
 		}
 	}
+
+	// Force a final progress update so the checkpoint is always saved at end of batch
+	idx.forceUpdateProgress(idx.config.EndBlock)
 
 	log.Printf("Finished: %d blocks, %d actions, %d new-hands, %d showdowns",
 		processed, actionsFound, newHandsFound, showdownsFound)
@@ -734,21 +741,25 @@ func (idx *Indexer) recordPlayerSession(attrs map[string]string, blockHeight int
 	}
 }
 
-// updateProgress updates the indexing progress in the database
+// updateProgress updates the indexing progress in the database every 100 blocks
 func (idx *Indexer) updateProgress(blockHeight int64) {
-	// Update every 100 blocks to reduce database writes
 	if blockHeight%100 == 0 {
-		totalBlocksScanned := blockHeight - idx.config.StartBlock + 1
-		_, err := idx.db.Exec(`
-			INSERT INTO indexing_progress (id, last_scanned_block, total_blocks_scanned, last_updated)
-			VALUES (1, $1, $2, NOW())
-			ON CONFLICT (id) DO UPDATE SET
-				last_scanned_block = EXCLUDED.last_scanned_block,
-				total_blocks_scanned = EXCLUDED.total_blocks_scanned,
-				last_updated = EXCLUDED.last_updated
-		`, blockHeight, totalBlocksScanned)
-		if err != nil {
-			log.Printf("Warning: failed to update progress at block %d: %v", blockHeight, err)
-		}
+		idx.forceUpdateProgress(blockHeight)
+	}
+}
+
+// forceUpdateProgress unconditionally writes the progress checkpoint
+func (idx *Indexer) forceUpdateProgress(blockHeight int64) {
+	totalBlocksScanned := blockHeight - idx.config.StartBlock + 1
+	_, err := idx.db.Exec(`
+		INSERT INTO indexing_progress (id, last_scanned_block, total_blocks_scanned, last_updated)
+		VALUES (1, $1, $2, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			last_scanned_block = EXCLUDED.last_scanned_block,
+			total_blocks_scanned = EXCLUDED.total_blocks_scanned,
+			last_updated = EXCLUDED.last_updated
+	`, blockHeight, totalBlocksScanned)
+	if err != nil {
+		log.Printf("Warning: failed to update progress at block %d: %v", blockHeight, err)
 	}
 }
