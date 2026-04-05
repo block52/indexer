@@ -485,6 +485,15 @@ func (idx *Indexer) handleNewHandAction(attrs map[string]string, blockHeight int
 			deck = EXCLUDED.deck
 	`, gameID, gameState.HandNumber, blockHeight, appHash, gameState.Deck)
 
+	if err != nil {
+		return err
+	}
+
+	// Derive and insert revealed cards from deck
+	if gameState.Deck != "" {
+		idx.deriveAndInsertCards(gameID, gameState.HandNumber, blockHeight, gameState.Deck)
+	}
+
 	return err
 }
 
@@ -609,7 +618,16 @@ func (idx *Indexer) handleHandStarted(attrs map[string]string, blockHeight int64
 			deck = EXCLUDED.deck
 	`, gameID, handNumber, blockHeight, deckSeed, deck, txHash)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Derive and insert revealed cards from deck
+	if deck != "" {
+		idx.deriveAndInsertCards(gameID, handNumber, blockHeight, deck)
+	}
+
+	return nil
 }
 
 // handleHandCompleted processes hand_completed events
@@ -762,4 +780,69 @@ func (idx *Indexer) forceUpdateProgress(blockHeight int64) {
 	if err != nil {
 		log.Printf("Warning: failed to update progress at block %d: %v", blockHeight, err)
 	}
+}
+
+// deriveAndInsertCards extracts hole cards and community cards from deck and inserts them
+// Assumes 2 players (4 hole cards) + 5 community cards = 9 cards total
+func (idx *Indexer) deriveAndInsertCards(gameID string, handNumber int, blockHeight int64, deck string) {
+	cards := parseDeck(deck)
+	if len(cards) < 9 {
+		return // Not enough cards in deck
+	}
+
+	numPlayers := 2 // Default to 2 players
+	totalHoleCards := numPlayers * 2
+
+	// Insert hole cards (first 4 cards for 2 players)
+	for i := 0; i < totalHoleCards && i < len(cards); i++ {
+		idx.db.Exec(`
+			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
+			VALUES ($1, $2, $3, $4, 'hole', $5)
+			ON CONFLICT DO NOTHING
+		`, gameID, handNumber, blockHeight, cards[i], i)
+	}
+
+	// Insert community cards (next 5 cards after hole cards)
+	for i := 0; i < 5 && totalHoleCards+i < len(cards); i++ {
+		idx.db.Exec(`
+			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
+			VALUES ($1, $2, $3, $4, 'community', $5)
+			ON CONFLICT DO NOTHING
+		`, gameID, handNumber, blockHeight, cards[totalHoleCards+i], i)
+	}
+
+	// Also insert/update hand_results for completeness
+	communityCards := cards[totalHoleCards : totalHoleCards+5]
+	idx.db.Exec(`
+		INSERT INTO hand_results (game_id, hand_number, block_height, community_cards, winner_count, tx_hash)
+		VALUES ($1, $2, $3, $4, 1, '')
+		ON CONFLICT (game_id, hand_number) DO UPDATE SET
+			community_cards = EXCLUDED.community_cards
+	`, gameID, handNumber, blockHeight, pq.Array(communityCards))
+}
+
+// parseDeck parses a deck string like "[AS]-KH-QD-..." into card codes
+// Returns lowercase card codes to match card_distribution_stats format
+func parseDeck(deck string) []string {
+	if deck == "" {
+		return nil
+	}
+
+	// Remove the brackets from first card
+	deck = strings.ReplaceAll(deck, "[", "")
+	deck = strings.ReplaceAll(deck, "]", "")
+
+	// Split by dash
+	cards := strings.Split(deck, "-")
+
+	// Clean up any whitespace and convert to lowercase
+	var result []string
+	for _, card := range cards {
+		card = strings.TrimSpace(card)
+		if card != "" {
+			result = append(result, strings.ToLower(card))
+		}
+	}
+
+	return result
 }
