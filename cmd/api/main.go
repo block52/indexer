@@ -84,6 +84,7 @@ func main() {
 		// Player endpoints
 		players := v1.Group("/players")
 		{
+			players.GET("", h.SearchPlayers)
 			players.GET("/:address/stats", h.GetPlayerStats)
 			players.GET("/:address/sessions", h.GetPlayerSessions)
 		}

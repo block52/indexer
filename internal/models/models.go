@@ -15,12 +15,12 @@ type PokerHand struct {
 
 // HandResult represents the result of a completed hand
 type HandResult struct {
-	GameID         string   `json:"game_id"`
-	HandNumber     int      `json:"hand_number"`
-	BlockHeight    int64    `json:"block_height"`
-	CommunityCards []string `json:"community_cards"`
-	WinnerCount    int      `json:"winner_count"`
-	TxHash         string   `json:"tx_hash"`
+	GameID         string    `json:"game_id"`
+	HandNumber     int       `json:"hand_number"`
+	BlockHeight    int64     `json:"block_height"`
+	CommunityCards []string  `json:"community_cards"`
+	WinnerCount    int       `json:"winner_count"`
+	TxHash         string    `json:"tx_hash"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -75,37 +75,43 @@ type RankStats struct {
 
 // ChiSquaredResult represents chi-squared test results
 type ChiSquaredResult struct {
-	ChiSquared      float64 `json:"chi_squared"`
-	DegreesOfFreedom int    `json:"degrees_of_freedom"`
-	PValue          float64 `json:"p_value"`
-	Result          string  `json:"result"`
-	Interpretation  string  `json:"interpretation"`
+	ChiSquared       float64 `json:"chi_squared"`
+	DegreesOfFreedom int     `json:"degrees_of_freedom"`
+	PValue           float64 `json:"p_value"`
+	Result           string  `json:"result"`
+	Interpretation   string  `json:"interpretation"`
 }
 
 // StatsSummary represents overall statistics
 type StatsSummary struct {
-	TotalHands         int64      `json:"total_hands"`
-	TotalCompletedHands int64     `json:"total_completed_hands"`
-	TotalRevealedCards int64      `json:"total_revealed_cards"`
-	UniqueGames        int64      `json:"unique_games"`
-	BlockHeightRange   *string    `json:"block_height_range,omitempty"`
-	FirstIndexedAt     *time.Time `json:"first_indexed_at,omitempty"`
-	LastIndexedAt      *time.Time `json:"last_indexed_at,omitempty"`
+	TotalHands          int64      `json:"total_hands"`
+	TotalCompletedHands int64      `json:"total_completed_hands"`
+	TotalRevealedCards  int64      `json:"total_revealed_cards"`
+	UniqueGames         int64      `json:"unique_games"`
+	BlockHeightRange    *string    `json:"block_height_range,omitempty"`
+	FirstIndexedAt      *time.Time `json:"first_indexed_at,omitempty"`
+	LastIndexedAt       *time.Time `json:"last_indexed_at,omitempty"`
 }
 
 // RandomnessReport represents a comprehensive randomness analysis
 type RandomnessReport struct {
-	Summary          StatsSummary      `json:"summary"`
-	CardChiSquared   ChiSquaredResult  `json:"card_chi_squared"`
-	SuitChiSquared   ChiSquaredResult  `json:"suit_chi_squared"`
-	RankChiSquared   ChiSquaredResult  `json:"rank_chi_squared"`
-	OutlierCards     []CardStats       `json:"outlier_cards"`
-	DuplicateSeeds   int64             `json:"duplicate_seeds"`
+	Summary        StatsSummary     `json:"summary"`
+	CardChiSquared ChiSquaredResult `json:"card_chi_squared"`
+	SuitChiSquared ChiSquaredResult `json:"suit_chi_squared"`
+	RankChiSquared ChiSquaredResult `json:"rank_chi_squared"`
+	OutlierCards   []CardStats      `json:"outlier_cards"`
+	DuplicateSeeds int64            `json:"duplicate_seeds"`
 }
 
-// PlayerStats represents player statistics
-type PlayerStats struct {
-	PlayerAddress    string  `json:"player_address"`
+// PlayerProfile is the full per-player profile: live-computed volume/money
+// (always fresh, from player_sessions/player_actions) merged with the
+// aggregate VIP + playing-style fields (from the player_stats table, populated
+// by refresh_all_player_stats). All money fields are raw USDC micro-units
+// (6 decimals); percentage fields are integers scaled x100 (2550 = 25.50%).
+type PlayerProfile struct {
+	PlayerAddress string `json:"player_address"`
+
+	// Volume & money (live-computed)
 	TotalHands       int64   `json:"total_hands"`
 	TotalActions     int64   `json:"total_actions"`
 	TotalBuyIns      int64   `json:"total_buy_ins"`
@@ -113,32 +119,84 @@ type PlayerStats struct {
 	NetProfit        int64   `json:"net_profit"`
 	SessionCount     int64   `json:"session_count"`
 	AvgSessionLength float64 `json:"avg_session_length"`
+
+	// VIP (aggregate)
+	VipTier              string `json:"vip_tier"`
+	RakebackPct          int    `json:"rakeback_pct"`
+	VipPoints            int64  `json:"vip_points"`
+	TotalRakeContributed int64  `json:"total_rake_contributed"`
+	CurrentMonthRake     int64  `json:"current_month_rake"`
+
+	// Playing style (aggregate; integers scaled x100)
+	Vpip             int `json:"vpip"`
+	Pfr              int `json:"pfr"`
+	AggressionFactor int `json:"aggression_factor"`
+	Wtsd             int `json:"wtsd"`
+	WonAtShowdown    int `json:"won_at_showdown"`
+
+	// Action counts (aggregate)
+	TotalBets   int64 `json:"total_bets"`
+	TotalRaises int64 `json:"total_raises"`
+	TotalCalls  int64 `json:"total_calls"`
+	TotalFolds  int64 `json:"total_folds"`
+	TotalChecks int64 `json:"total_checks"`
+
+	// Records (aggregate)
+	BiggestPotWon        int64 `json:"biggest_pot_won"`
+	BiggestHandProfit    int64 `json:"biggest_hand_profit"`
+	LongestSessionBlocks int64 `json:"longest_session_blocks"`
+
+	// Timestamps (aggregate)
+	FirstSeenBlock *int64     `json:"first_seen_block,omitempty"`
+	LastSeenBlock  *int64     `json:"last_seen_block,omitempty"`
+	StatsUpdatedAt *time.Time `json:"stats_updated_at,omitempty"`
+}
+
+// PlayerListItem is a lightweight row for the searchable player directory.
+type PlayerListItem struct {
+	PlayerAddress        string `json:"player_address"`
+	VipTier              string `json:"vip_tier"`
+	RakebackPct          int    `json:"rakeback_pct"`
+	TotalHands           int64  `json:"total_hands"`
+	TotalActions         int64  `json:"total_actions"`
+	NetProfit            int64  `json:"net_profit"`
+	TotalRakeContributed int64  `json:"total_rake_contributed"`
+	LastSeenBlock        *int64 `json:"last_seen_block,omitempty"`
+}
+
+// PlayerSearchParams are the query params for GET /api/v1/players.
+type PlayerSearchParams struct {
+	Search string `form:"search" binding:"omitempty"`
+	Sort   string `form:"sort" binding:"omitempty,oneof=net_profit total_hands total_rake_contributed vip_points last_seen_block"`
+	Order  string `form:"order" binding:"omitempty,oneof=asc desc"`
+	Limit  int    `form:"limit" binding:"omitempty,min=1,max=1000"`
+	Offset int    `form:"offset" binding:"omitempty,min=0"`
 }
 
 // PlayerSession represents a player's game session
 type PlayerSession struct {
-	PlayerAddress  string     `json:"player_address"`
-	GameID         string     `json:"game_id"`
-	JoinBlock      int64      `json:"join_block"`
-	LeaveBlock     *int64     `json:"leave_block,omitempty"`
-	BuyInAmount    int64      `json:"buy_in_amount"`
-	CashOutAmount  *int64     `json:"cash_out_amount,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	PlayerAddress string    `json:"player_address"`
+	GameID        string    `json:"game_id"`
+	JoinBlock     int64     `json:"join_block"`
+	LeaveBlock    *int64    `json:"leave_block,omitempty"`
+	BuyInAmount   int64     `json:"buy_in_amount"`
+	CashOutAmount *int64    `json:"cash_out_amount,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // TimelineDataPoint represents distribution over time
 type TimelineDataPoint struct {
-	BlockRange       string  `json:"block_range"`
-	TotalCards       int64   `json:"total_cards"`
-	ChiSquared       float64 `json:"chi_squared"`
-	PassesTest       bool    `json:"passes_test"`
+	BlockRange string  `json:"block_range"`
+	TotalCards int64   `json:"total_cards"`
+	ChiSquared float64 `json:"chi_squared"`
+	PassesTest bool    `json:"passes_test"`
 }
 
 // SeedEntropyData represents deck seed analysis
 type SeedEntropyData struct {
-	TotalSeeds     int64 `json:"total_seeds"`
-	UniqueSeeds    int64 `json:"unique_seeds"`
-	DuplicateCount int64 `json:"duplicate_count"`
+	TotalSeeds     int64   `json:"total_seeds"`
+	UniqueSeeds    int64   `json:"unique_seeds"`
+	DuplicateCount int64   `json:"duplicate_count"`
 	EntropyScore   float64 `json:"entropy_score"`
 }
 
@@ -174,13 +232,13 @@ type HealthStatus struct {
 
 // IndexingStatus represents indexing progress and statistics
 type IndexingStatus struct {
-	TotalBlocks      int64   `json:"total_blocks"`
-	BlocksIndexed    int64   `json:"blocks_indexed"`
-	PercentComplete  float64 `json:"percent_complete"`
-	LastBlockIndexed int64   `json:"last_block_indexed"`
-	FirstBlockIndexed int64  `json:"first_block_indexed"`
-	TotalHands       int64   `json:"total_hands"`
-	TotalGames       int64   `json:"total_games"`
-	BlocksPerSecond  float64 `json:"blocks_per_second,omitempty"`
-	EstimatedTimeRemaining string `json:"estimated_time_remaining,omitempty"`
+	TotalBlocks            int64   `json:"total_blocks"`
+	BlocksIndexed          int64   `json:"blocks_indexed"`
+	PercentComplete        float64 `json:"percent_complete"`
+	LastBlockIndexed       int64   `json:"last_block_indexed"`
+	FirstBlockIndexed      int64   `json:"first_block_indexed"`
+	TotalHands             int64   `json:"total_hands"`
+	TotalGames             int64   `json:"total_games"`
+	BlocksPerSecond        float64 `json:"blocks_per_second,omitempty"`
+	EstimatedTimeRemaining string  `json:"estimated_time_remaining,omitempty"`
 }
