@@ -352,13 +352,15 @@ func (db *DB) GetSeedEntropy() (*models.SeedEntropyData, error) {
 	return data, nil
 }
 
-// GetPlayerStats retrieves player statistics
-func (db *DB) GetPlayerStats(playerAddress string) (*models.PlayerStats, error) {
+// GetPlayerProfile returns the full profile: live-computed volume/money merged
+// with the aggregate VIP + playing-style row from player_stats (if present).
+func (db *DB) GetPlayerProfile(playerAddress string) (*models.PlayerProfile, error) {
 	ctx, cancel := getContext()
 	defer cancel()
 
-	stats := &models.PlayerStats{PlayerAddress: playerAddress}
+	p := &models.PlayerProfile{PlayerAddress: playerAddress, VipTier: "bronze"}
 
+	// Live volume/money — always fresh, independent of the aggregate refresh.
 	err := db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(COUNT(DISTINCT ps.game_id), 0) as total_hands,
@@ -373,24 +375,107 @@ func (db *DB) GetPlayerStats(playerAddress string) (*models.PlayerStats, error) 
 		WHERE ps.player_address = $1
 		GROUP BY ps.player_address
 	`, playerAddress).Scan(
-		&stats.TotalHands,
-		&stats.TotalActions,
-		&stats.TotalBuyIns,
-		&stats.TotalCashOuts,
-		&stats.NetProfit,
-		&stats.SessionCount,
-		&stats.AvgSessionLength,
+		&p.TotalHands, &p.TotalActions, &p.TotalBuyIns, &p.TotalCashOuts,
+		&p.NetProfit, &p.SessionCount, &p.AvgSessionLength,
 	)
-
-	if err == sql.ErrNoRows {
-		// Return empty stats for player with no data
-		return stats, nil
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get player volume: %w", err)
 	}
+
+	// Aggregate VIP + playing-style (from player_stats, populated by
+	// refresh_all_player_stats). Absent row → keep the bronze/zero defaults.
+	err = db.QueryRowContext(ctx, `
+		SELECT
+			vip_tier,
+			get_rakeback_percentage(vip_tier),
+			vip_points, total_rake_contributed, current_month_rake,
+			vpip, pfr, aggression_factor, wtsd, won_at_showdown,
+			total_bets, total_raises, total_calls, total_folds, total_checks,
+			biggest_pot_won, biggest_hand_profit, longest_session_blocks,
+			first_seen_block, last_seen_block, stats_updated_at
+		FROM player_stats
+		WHERE player_address = $1
+	`, playerAddress).Scan(
+		&p.VipTier, &p.RakebackPct,
+		&p.VipPoints, &p.TotalRakeContributed, &p.CurrentMonthRake,
+		&p.Vpip, &p.Pfr, &p.AggressionFactor, &p.Wtsd, &p.WonAtShowdown,
+		&p.TotalBets, &p.TotalRaises, &p.TotalCalls, &p.TotalFolds, &p.TotalChecks,
+		&p.BiggestPotWon, &p.BiggestHandProfit, &p.LongestSessionBlocks,
+		&p.FirstSeenBlock, &p.LastSeenBlock, &p.StatsUpdatedAt,
+	)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get player aggregate: %w", err)
+	}
+
+	return p, nil
+}
+
+// playerSortColumns whitelists sort keys → SQL columns (params are already
+// oneof-validated; the map is a second guard against injection).
+var playerSortColumns = map[string]string{
+	"net_profit":             "net_profit",
+	"total_hands":            "total_hands",
+	"total_rake_contributed": "total_rake_contributed",
+	"vip_points":             "vip_points",
+	"last_seen_block":        "last_seen_block",
+}
+
+// SearchPlayers returns a paginated, sortable, address-searchable list from the
+// aggregate player_stats table.
+func (db *DB) SearchPlayers(params models.PlayerSearchParams) ([]models.PlayerListItem, int64, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	sortCol, ok := playerSortColumns[params.Sort]
+	if !ok {
+		sortCol = "net_profit"
+	}
+	order := "DESC"
+	if params.Order == "asc" {
+		order = "ASC"
+	}
+
+	// Case-insensitive substring match on the address (empty → all players).
+	searchArg := "%" + params.Search + "%"
+
+	var total int64
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM player_stats WHERE player_address ILIKE $1`,
+		searchArg,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count players: %w", err)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			player_address, vip_tier, get_rakeback_percentage(vip_tier),
+			total_hands, total_actions, net_profit, total_rake_contributed, last_seen_block
+		FROM player_stats
+		WHERE player_address ILIKE $1
+		ORDER BY %s %s NULLS LAST, player_address ASC
+		LIMIT $2 OFFSET $3
+	`, sortCol, order)
+
+	rows, err := db.QueryContext(ctx, query, searchArg, params.Limit, params.Offset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get player stats: %w", err)
+		return nil, 0, fmt.Errorf("failed to query players: %w", err)
+	}
+	defer rows.Close()
+
+	players := []models.PlayerListItem{}
+	for rows.Next() {
+		var it models.PlayerListItem
+		if err := rows.Scan(
+			&it.PlayerAddress, &it.VipTier, &it.RakebackPct,
+			&it.TotalHands, &it.TotalActions, &it.NetProfit,
+			&it.TotalRakeContributed, &it.LastSeenBlock,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan player: %w", err)
+		}
+		players = append(players, it)
 	}
 
-	return stats, nil
+	return players, total, nil
 }
 
 // GetPlayerSessions retrieves player game sessions

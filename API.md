@@ -393,9 +393,53 @@ curl "http://localhost:8000/api/v1/analysis/seeds"
 
 ## Player Endpoints
 
+> Money fields are raw USDC micro-units (6 decimals): `5000000` = $5.00.
+> Percentage fields (`vpip`, `pfr`, `aggression_factor`, `wtsd`, `won_at_showdown`)
+> are integers scaled ×100: `2550` = 25.50%.
+>
+> The aggregate fields (VIP, playing-style, records) come from the `player_stats`
+> table, which the indexer refreshes after each indexing run
+> (`refresh_all_player_stats` + `update_vip_tiers`). Volume/money fields are
+> computed live and are always current.
+
+### `GET /api/v1/players`
+
+Searchable, sortable, paginated player directory.
+
+**Query Parameters:**
+- `search` (string, optional): case-insensitive substring match on address
+- `sort` (string, optional): one of `net_profit` (default), `total_hands`, `total_rake_contributed`, `vip_points`, `last_seen_block`
+- `order` (string, optional): `asc` or `desc` (default)
+- `limit` (int, optional): default 50, max 1000
+- `offset` (int, optional): default 0
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/v1/players?search=poker1&sort=net_profit&order=desc&limit=20"
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "player_address": "poker1abc...",
+      "vip_tier": "gold",
+      "rakeback_pct": 10,
+      "total_hands": 156,
+      "total_actions": 478,
+      "net_profit": 5000000,
+      "total_rake_contributed": 250000000,
+      "last_seen_block": 12500
+    }
+  ],
+  "pagination": { "limit": 20, "offset": 0, "total": 342 }
+}
+```
+
 ### `GET /api/v1/players/:address/stats`
 
-Get player statistics.
+Get a player's full profile (volume + VIP + playing style + records).
 
 **Example:**
 ```bash
@@ -408,11 +452,32 @@ curl "http://localhost:8000/api/v1/players/poker1abc.../stats"
   "player_address": "poker1abc...",
   "total_hands": 156,
   "total_actions": 478,
-  "total_buy_ins": 50000,
-  "total_cash_outs": 55000,
-  "net_profit": 5000,
+  "total_buy_ins": 50000000,
+  "total_cash_outs": 55000000,
+  "net_profit": 5000000,
   "session_count": 12,
-  "avg_session_length": 245.5
+  "avg_session_length": 245.5,
+  "vip_tier": "gold",
+  "rakeback_pct": 10,
+  "vip_points": 25000,
+  "total_rake_contributed": 250000000,
+  "current_month_rake": 210000000,
+  "vpip": 2550,
+  "pfr": 1800,
+  "aggression_factor": 320,
+  "wtsd": 2800,
+  "won_at_showdown": 5200,
+  "total_bets": 120,
+  "total_raises": 90,
+  "total_calls": 65,
+  "total_folds": 140,
+  "total_checks": 63,
+  "biggest_pot_won": 8000000,
+  "biggest_hand_profit": 6000000,
+  "longest_session_blocks": 900,
+  "first_seen_block": 10000,
+  "last_seen_block": 12500,
+  "stats_updated_at": "2024-02-24T10:00:00Z"
 }
 ```
 
