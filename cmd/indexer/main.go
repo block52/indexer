@@ -262,9 +262,29 @@ func runContinuous(db *sql.DB, baseConfig Config, loopDelay int) {
 		}
 
 		log.Printf("Indexing run completed at %s", time.Now().Format(time.RFC3339))
+
+		// Refresh the aggregate player_stats + VIP tiers so the /players
+		// directory and profile endpoints stay current. Non-fatal: a failure
+		// here must not stop indexing.
+		refreshPlayerStats(db)
+
 		log.Printf("Waiting %d seconds before next run...", loopDelay)
 		time.Sleep(time.Duration(loopDelay) * time.Second)
 	}
+}
+
+// refreshPlayerStats rebuilds the aggregate player_stats table and recomputes
+// VIP tiers from the raw player_actions/player_sessions the indexer just wrote.
+func refreshPlayerStats(db *sql.DB) {
+	if _, err := db.Exec("SELECT refresh_all_player_stats()"); err != nil {
+		log.Printf("Warning: refresh_all_player_stats failed: %v", err)
+		return
+	}
+	if _, err := db.Exec("SELECT update_vip_tiers()"); err != nil {
+		log.Printf("Warning: update_vip_tiers failed: %v", err)
+		return
+	}
+	log.Println("Player stats + VIP tiers refreshed")
 }
 
 // Indexer handles block indexing

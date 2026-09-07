@@ -398,7 +398,7 @@ func (h *Handler) GetRandomnessReport(c *gin.Context) {
 func (h *Handler) GetPlayerStats(c *gin.Context) {
 	playerAddress := c.Param("address")
 
-	stats, err := h.db.GetPlayerStats(playerAddress)
+	profile, err := h.db.GetPlayerProfile(playerAddress)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Database error",
@@ -408,7 +408,42 @@ func (h *Handler) GetPlayerStats(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, stats)
+	c.JSON(http.StatusOK, profile)
+}
+
+// SearchPlayers lists players (address-searchable, sortable, paginated) for the
+// player directory.
+func (h *Handler) SearchPlayers(c *gin.Context) {
+	var params models.PlayerSearchParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid parameters",
+			Message: err.Error(),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 50
+	}
+
+	players, total, err := h.db.SearchPlayers(params)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Database error",
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	response := models.PaginatedResponse{Data: players}
+	response.Pagination.Limit = params.Limit
+	response.Pagination.Offset = params.Offset
+	response.Pagination.Total = total
+
+	c.JSON(http.StatusOK, response)
 }
 
 // GetPlayerSessions returns player game sessions
