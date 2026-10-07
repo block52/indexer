@@ -22,7 +22,7 @@ func (db *DB) GetHands(limit, offset int, gameID string, startBlock, endBlock in
 	defer cancel()
 
 	// Build query with optional filters
-	query := `SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, indexed_at
+	query := `SELECT game_id, hand_number, block_height, deck_seed, tx_hash, indexed_at
 	          FROM poker_hands WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM poker_hands WHERE 1=1`
 	args := []interface{}{}
@@ -66,7 +66,7 @@ func (db *DB) GetHands(limit, offset int, gameID string, startBlock, endBlock in
 	var hands []models.PokerHand
 	for rows.Next() {
 		var hand models.PokerHand
-		if err := rows.Scan(&hand.GameID, &hand.HandNumber, &hand.BlockHeight, &hand.DeckSeed, &hand.Deck, &hand.TxHash, &hand.CreatedAt); err != nil {
+		if err := rows.Scan(&hand.GameID, &hand.HandNumber, &hand.BlockHeight, &hand.DeckSeed, &hand.TxHash, &hand.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan hand: %w", err)
 		}
 		hands = append(hands, hand)
@@ -84,12 +84,12 @@ func (db *DB) GetHandDetails(gameID string, handNumber int) (*models.HandDetails
 
 	// Get hand info
 	err := db.QueryRowContext(ctx, `
-		SELECT game_id, hand_number, block_height, deck_seed, deck, tx_hash, indexed_at
+		SELECT game_id, hand_number, block_height, deck_seed, tx_hash, indexed_at
 		FROM poker_hands
 		WHERE game_id = $1 AND hand_number = $2
 	`, gameID, handNumber).Scan(
 		&details.GameID, &details.HandNumber, &details.BlockHeight,
-		&details.DeckSeed, &details.Deck, &details.TxHash, &details.CreatedAt,
+		&details.DeckSeed, &details.TxHash, &details.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("hand not found")

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -32,6 +33,9 @@ type Config struct {
 	StartBlock int64
 	EndBlock   int64
 	BatchSize  int
+	// BlockDelay pauses after each chain read (block_results, historical state
+	// queries) so a backfill can't starve the node it reads from.
+	BlockDelay time.Duration
 }
 
 // BlockResult from RPC
@@ -80,9 +84,10 @@ type StatusResult struct {
 	} `json:"result"`
 }
 
-// GameStateResponse from REST API
+// GameStateResponse from the REST API: `game_state` is a JSON-encoded string
+// (a TexasHoldemStateDTO, or a GameStateResponseDTO with it under `gameState`).
 type GameStateResponse struct {
-	GameState *GameState `json:"game_state"`
+	GameState string `json:"game_state"`
 }
 
 // GameState represents the poker game state
@@ -92,7 +97,6 @@ type GameState struct {
 	Dealer         int      `json:"dealer"`
 	Players        []Player `json:"players"`
 	CommunityCards []string `json:"communityCards"`
-	Deck           string   `json:"deck"`
 	Round          string   `json:"round"`
 	HandNumber     int      `json:"handNumber"`
 	Winners        []Winner `json:"winners"`
@@ -128,6 +132,7 @@ func main() {
 	batchSize := flag.Int("batch", 100, "Blocks per batch")
 	continuous := flag.Bool("continuous", false, "Run continuously, resuming from last indexed block")
 	loopDelay := flag.Int("loop-delay", 60, "Seconds to wait between indexing runs in continuous mode")
+	blockDelayMs := flag.Int("block-delay-ms", 0, "Milliseconds to pause after each chain read (0 = none). Use ~25 when backfilling from a validator's local RPC so it keeps up with consensus")
 
 	flag.Parse()
 
@@ -159,6 +164,7 @@ func main() {
 		StartBlock: *startBlock,
 		EndBlock:   *endBlock,
 		BatchSize:  *batchSize,
+		BlockDelay: time.Duration(*blockDelayMs) * time.Millisecond,
 	}
 
 	// Connect to database
@@ -188,6 +194,7 @@ func main() {
 
 	log.Printf("Using RPC: %s", config.NodeRPC)
 	log.Printf("Using API: %s", config.NodeAPI)
+	log.Printf("Chain read delay: %s", config.BlockDelay)
 
 	if *continuous {
 		log.Println("Running in continuous mode...")
@@ -360,7 +367,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 					idx.recordPlayerAction(player, gameID, action, attrs["amount"], height)
 				}
 
-				// New hand started - record deck info
+				// New hand started - record the hand (never a deck)
 				if action == "new-hand" {
 					newHandsFound++
 					if err := idx.handleNewHandAction(attrs, height, blockInfo.AppHash); err != nil {
@@ -437,6 +444,7 @@ func (idx *Indexer) fetchBlockWithEvents(height int64) (*BlockInfo, []Event, err
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, nil, fmt.Errorf("JSON decode failed: %w", err)
 	}
+	idx.throttle()
 
 	// Get block header for app hash
 	blockURL := fmt.Sprintf("%s/block?height=%d", idx.config.NodeRPC, height)
@@ -478,48 +486,31 @@ func (idx *Indexer) parseEventAttrs(event Event) map[string]string {
 }
 
 // handleNewHandAction processes a new-hand action from action_performed event
+// (legacy chains without hand_started events). Records the hand; never a deck.
 func (idx *Indexer) handleNewHandAction(attrs map[string]string, blockHeight int64, appHash string) error {
 	gameID := attrs["game_id"]
 	if gameID == "" {
 		return fmt.Errorf("no game_id in event")
 	}
 
-	// Query current game state to get hand number and deck
-	gameState, err := idx.queryGameState(gameID)
-	if err != nil {
-		// Game state query failed - store what we have
-		_, err := idx.db.Exec(`
-			INSERT INTO poker_hands (game_id, hand_number, block_height, deck_seed, deck, tx_hash)
-			VALUES ($1, 0, $2, $3, '', '')
-			ON CONFLICT (game_id, hand_number) DO NOTHING
-		`, gameID, blockHeight, appHash)
-		return err
+	handNumber := 0
+	if gameState, err := idx.queryGameStateAt(gameID, blockHeight); err == nil {
+		handNumber = gameState.HandNumber
 	}
 
-	// Store hand with deck info from game state
-	_, err = idx.db.Exec(`
-		INSERT INTO poker_hands (game_id, hand_number, block_height, deck_seed, deck, tx_hash)
-		VALUES ($1, $2, $3, $4, $5, '')
+	_, err := idx.db.Exec(`
+		INSERT INTO poker_hands (game_id, hand_number, block_height, deck_seed, tx_hash)
+		VALUES ($1, $2, $3, $4, '')
 		ON CONFLICT (game_id, hand_number) DO UPDATE SET
-			deck_seed = EXCLUDED.deck_seed,
-			deck = EXCLUDED.deck
-	`, gameID, gameState.HandNumber, blockHeight, appHash, gameState.Deck)
-
-	if err != nil {
-		return err
-	}
-
-	// Derive and insert revealed cards from deck
-	if gameState.Deck != "" {
-		idx.deriveAndInsertCards(gameID, gameState.HandNumber, blockHeight, gameState.Deck)
-	}
-
+			deck_seed = EXCLUDED.deck_seed
+	`, gameID, handNumber, blockHeight, appHash)
 	return err
 }
 
-// checkAndHandleShowdown checks if game is at showdown and records revealed cards
+// checkAndHandleShowdown checks if the game reached showdown at this block and
+// records the shown cards (legacy chains without hand_completed events).
 func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64) error {
-	gameState, err := idx.queryGameState(gameID)
+	gameState, err := idx.queryGameStateAt(gameID, blockHeight)
 	if err != nil {
 		return err
 	}
@@ -529,79 +520,102 @@ func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64) err
 		return nil
 	}
 
-	// Collect revealed hole cards
-	var revealedCards []string
-	for _, player := range gameState.Players {
-		if len(player.HoleCards) > 0 {
-			revealedCards = append(revealedCards, player.HoleCards...)
-		}
+	if err := idx.recordHandResult(gameID, gameState.HandNumber, blockHeight, normalizeCards(gameState.CommunityCards),
+		len(gameState.Winners), shownHoleCards(gameState.Players), ""); err != nil {
+		return err
 	}
+	return fmt.Errorf("showdown processed") // Signal that we found one
+}
 
-	// Insert hand result
-	_, err = idx.db.Exec(`
+// recordHandResult stores a finished hand's community cards and the hole cards
+// that were shown. Cards must already be normalized.
+func (idx *Indexer) recordHandResult(gameID string, handNumber int, blockHeight int64, community []string, winnerCount int, shownHole []string, txHash string) error {
+	_, err := idx.db.Exec(`
 		INSERT INTO hand_results (game_id, hand_number, block_height, community_cards, winner_count, tx_hash)
-		VALUES ($1, $2, $3, $4, $5, '')
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (game_id, hand_number) DO UPDATE SET
 			community_cards = EXCLUDED.community_cards,
 			winner_count = EXCLUDED.winner_count
-	`, gameID, gameState.HandNumber, blockHeight, pq.Array(gameState.CommunityCards), len(gameState.Winners))
-
+	`, gameID, handNumber, blockHeight, pq.Array(community), winnerCount, txHash)
 	if err != nil {
 		return fmt.Errorf("failed to insert hand result: %w", err)
 	}
 
-	// Insert community cards
-	for i, card := range gameState.CommunityCards {
-		if card == "" {
-			continue
-		}
+	for i, card := range community {
 		idx.db.Exec(`
 			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
 			VALUES ($1, $2, $3, $4, 'community', $5)
 			ON CONFLICT DO NOTHING
-		`, gameID, gameState.HandNumber, blockHeight, card, i)
+		`, gameID, handNumber, blockHeight, card, i)
 	}
-
-	// Insert revealed hole cards
-	for i, card := range revealedCards {
-		if card == "" {
-			continue
-		}
+	for i, card := range shownHole {
 		idx.db.Exec(`
 			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
 			VALUES ($1, $2, $3, $4, 'hole', $5)
 			ON CONFLICT DO NOTHING
-		`, gameID, gameState.HandNumber, blockHeight, card, i)
+		`, gameID, handNumber, blockHeight, card, i)
 	}
-
-	return fmt.Errorf("showdown processed") // Signal that we found one
+	return nil
 }
 
-// queryGameState fetches game state from the REST API
-func (idx *Indexer) queryGameState(gameID string) (*GameState, error) {
-	url := fmt.Sprintf("%s/pokerchain/poker/v1/game_state_public/%s", idx.config.NodeAPI, gameID)
+// queryGameStateAt fetches the masked public game state from the REST API, as
+// of `height` (0 = latest) via the x-cosmos-block-height header. Hole cards come
+// back masked except for players who showed.
+func (idx *Indexer) queryGameStateAt(gameID string, height int64) (*GameState, error) {
+	url := fmt.Sprintf("%s/block52/pokerchain/poker/v1/game_state_public/%s", idx.config.NodeAPI, gameID)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if height > 0 {
+		req.Header.Set("x-cosmos-block-height", strconv.FormatInt(height, 10))
+	}
 
-	resp, err := idx.client.Get(url)
+	resp, err := idx.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("game state request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	defer idx.throttle()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("game state read failed: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("game state HTTP %d: %s", resp.StatusCode, string(body))
 	}
+	return parseGameStateResponse(body)
+}
 
-	var result GameStateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+// parseGameStateResponse decodes `{"game_state": "<json>"}`, where the inner
+// JSON is a TexasHoldemStateDTO or a GameStateResponseDTO wrapping one.
+func parseGameStateResponse(body []byte) (*GameState, error) {
+	var outer GameStateResponse
+	if err := json.Unmarshal(body, &outer); err != nil {
 		return nil, fmt.Errorf("game state JSON decode failed: %w", err)
 	}
-
-	if result.GameState == nil {
+	if outer.GameState == "" {
 		return nil, fmt.Errorf("no game state in response")
 	}
+	var wrapped struct {
+		GameState *GameState `json:"gameState"`
+	}
+	if err := json.Unmarshal([]byte(outer.GameState), &wrapped); err == nil && wrapped.GameState != nil {
+		return wrapped.GameState, nil
+	}
+	var state GameState
+	if err := json.Unmarshal([]byte(outer.GameState), &state); err != nil {
+		return nil, fmt.Errorf("game state payload decode failed: %w", err)
+	}
+	return &state, nil
+}
 
-	return result.GameState, nil
+// throttle pauses for the configured chain read delay.
+func (idx *Indexer) throttle() {
+	if idx.config.BlockDelay > 0 {
+		time.Sleep(idx.config.BlockDelay)
+	}
 }
 
 // processNewEvent handles the new hand_started/hand_completed events (v0.1.33+)
@@ -622,7 +636,8 @@ func (idx *Indexer) handleHandStarted(attrs map[string]string, blockHeight int64
 	gameID := attrs["game_id"]
 	handNumber, _ := strconv.Atoi(attrs["hand_number"])
 	deckSeed := attrs["deck_seed"]
-	deck := attrs["deck"]
+	// Older chain events also carry a `deck` attribute. It is deliberately
+	// ignored: decks are never read or stored.
 
 	if h, ok := attrs["block_height"]; ok {
 		if parsed, err := strconv.ParseInt(h, 10, 64); err == nil {
@@ -631,31 +646,21 @@ func (idx *Indexer) handleHandStarted(attrs map[string]string, blockHeight int64
 	}
 
 	_, err := idx.db.Exec(`
-		INSERT INTO poker_hands (game_id, hand_number, block_height, deck_seed, deck, tx_hash)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO poker_hands (game_id, hand_number, block_height, deck_seed, tx_hash)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (game_id, hand_number) DO UPDATE SET
-			deck_seed = EXCLUDED.deck_seed,
-			deck = EXCLUDED.deck
-	`, gameID, handNumber, blockHeight, deckSeed, deck, txHash)
-
-	if err != nil {
-		return err
-	}
-
-	// Derive and insert revealed cards from deck
-	if deck != "" {
-		idx.deriveAndInsertCards(gameID, handNumber, blockHeight, deck)
-	}
-
-	return nil
+			deck_seed = EXCLUDED.deck_seed
+	`, gameID, handNumber, blockHeight, deckSeed, txHash)
+	return err
 }
 
-// handleHandCompleted processes hand_completed events
+// handleHandCompleted processes hand_completed events. Community cards come
+// from the event; hole cards ONLY from the masked public state at the hand's
+// end (players with status "showing"). The event's revealed_hole_cards is
+// ignored: on older blocks it lists every seat's cards, folded ones included.
 func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int64, txHash string) error {
 	gameID := attrs["game_id"]
 	handNumber, _ := strconv.Atoi(attrs["hand_number"])
-	communityCardsStr := attrs["community_cards"]
-	revealedHoleCardsStr := attrs["revealed_hole_cards"]
 	winnerCount, _ := strconv.Atoi(attrs["winner_count"])
 
 	if h, ok := attrs["block_height"]; ok {
@@ -664,49 +669,25 @@ func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int
 		}
 	}
 
-	var communityCards []string
-	if communityCardsStr != "" {
-		communityCards = strings.Split(communityCardsStr, ",")
-	}
+	community := splitCards(attrs["community_cards"])
 
-	_, err := idx.db.Exec(`
-		INSERT INTO hand_results (game_id, hand_number, block_height, community_cards, winner_count, tx_hash)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (game_id, hand_number) DO UPDATE SET
-			community_cards = EXCLUDED.community_cards,
-			winner_count = EXCLUDED.winner_count
-	`, gameID, handNumber, blockHeight, pq.Array(communityCards), winnerCount, txHash)
-
-	if err != nil {
-		return fmt.Errorf("failed to insert hand result: %w", err)
-	}
-
-	for i, card := range communityCards {
-		if card == "" {
-			continue
-		}
-		idx.db.Exec(`
-			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
-			VALUES ($1, $2, $3, $4, 'community', $5)
-			ON CONFLICT DO NOTHING
-		`, gameID, handNumber, blockHeight, card, i)
-	}
-
-	if revealedHoleCardsStr != "" {
-		holeCards := strings.Split(revealedHoleCardsStr, ",")
-		for i, card := range holeCards {
-			if card == "" {
-				continue
-			}
-			idx.db.Exec(`
-				INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
-				VALUES ($1, $2, $3, $4, 'hole', $5)
-				ON CONFLICT DO NOTHING
-			`, gameID, handNumber, blockHeight, card, i)
+	var shown []string
+	snap, err := handEndSnapshot(func(h int64) (*GameState, error) { return idx.queryGameStateAt(gameID, h) }, handNumber, blockHeight)
+	switch {
+	case errors.Is(err, errStatePruned):
+		log.Printf("Hand %s/%d: state at block %d is pruned on the node; storing community cards only", gameID, handNumber, blockHeight)
+	case err != nil:
+		log.Printf("Hand %s/%d: hand-end state unavailable (%v); storing community cards only", gameID, handNumber, err)
+	case snap == nil:
+		log.Printf("Hand %s/%d: no finished state at block %d or %d; storing community cards only", gameID, handNumber, blockHeight, blockHeight-1)
+	default:
+		shown = shownHoleCards(snap.Players)
+		if len(community) == 0 {
+			community = normalizeCards(snap.CommunityCards)
 		}
 	}
 
-	return nil
+	return idx.recordHandResult(gameID, handNumber, blockHeight, community, winnerCount, shown, txHash)
 }
 
 // getLatestBlockHeight fetches the current chain height
@@ -800,69 +781,4 @@ func (idx *Indexer) forceUpdateProgress(blockHeight int64) {
 	if err != nil {
 		log.Printf("Warning: failed to update progress at block %d: %v", blockHeight, err)
 	}
-}
-
-// deriveAndInsertCards extracts hole cards and community cards from deck and inserts them
-// Assumes 2 players (4 hole cards) + 5 community cards = 9 cards total
-func (idx *Indexer) deriveAndInsertCards(gameID string, handNumber int, blockHeight int64, deck string) {
-	cards := parseDeck(deck)
-	if len(cards) < 9 {
-		return // Not enough cards in deck
-	}
-
-	numPlayers := 2 // Default to 2 players
-	totalHoleCards := numPlayers * 2
-
-	// Insert hole cards (first 4 cards for 2 players)
-	for i := 0; i < totalHoleCards && i < len(cards); i++ {
-		idx.db.Exec(`
-			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
-			VALUES ($1, $2, $3, $4, 'hole', $5)
-			ON CONFLICT DO NOTHING
-		`, gameID, handNumber, blockHeight, cards[i], i)
-	}
-
-	// Insert community cards (next 5 cards after hole cards)
-	for i := 0; i < 5 && totalHoleCards+i < len(cards); i++ {
-		idx.db.Exec(`
-			INSERT INTO revealed_cards (game_id, hand_number, block_height, card, card_type, position)
-			VALUES ($1, $2, $3, $4, 'community', $5)
-			ON CONFLICT DO NOTHING
-		`, gameID, handNumber, blockHeight, cards[totalHoleCards+i], i)
-	}
-
-	// Also insert/update hand_results for completeness
-	communityCards := cards[totalHoleCards : totalHoleCards+5]
-	idx.db.Exec(`
-		INSERT INTO hand_results (game_id, hand_number, block_height, community_cards, winner_count, tx_hash)
-		VALUES ($1, $2, $3, $4, 1, '')
-		ON CONFLICT (game_id, hand_number) DO UPDATE SET
-			community_cards = EXCLUDED.community_cards
-	`, gameID, handNumber, blockHeight, pq.Array(communityCards))
-}
-
-// parseDeck parses a deck string like "[AS]-KH-QD-..." into card codes
-// Returns lowercase card codes to match card_distribution_stats format
-func parseDeck(deck string) []string {
-	if deck == "" {
-		return nil
-	}
-
-	// Remove the brackets from first card
-	deck = strings.ReplaceAll(deck, "[", "")
-	deck = strings.ReplaceAll(deck, "]", "")
-
-	// Split by dash
-	cards := strings.Split(deck, "-")
-
-	// Clean up any whitespace and convert to lowercase
-	var result []string
-	for _, card := range cards {
-		card = strings.TrimSpace(card)
-		if card != "" {
-			result = append(result, strings.ToLower(card))
-		}
-	}
-
-	return result
 }

@@ -94,7 +94,6 @@ curl "http://localhost:8000/api/v1/hands?start_block=1000&end_block=2000"
       "hand_number": 42,
       "block_height": 12345,
       "deck_seed": "abc123...",
-      "deck": "AS,KH,QD...",
       "tx_hash": "tx123",
       "created_at": "2024-02-24T10:00:00Z"
     }
@@ -106,6 +105,8 @@ curl "http://localhost:8000/api/v1/hands?start_block=1000&end_block=2000"
   }
 }
 ```
+
+> **Cards:** responses never include a deck. `revealed_cards` holds the community cards and only the hole cards that were **shown** at the table (see README, *Card privacy*). `deck_seed` is the block hash used as the shuffle seed.
 
 ### `GET /api/v1/hands/:game_id/:hand_number`
 
@@ -123,7 +124,6 @@ curl "http://localhost:8000/api/v1/hands/game123/42"
   "hand_number": 42,
   "block_height": 12345,
   "deck_seed": "abc123...",
-  "deck": "AS,KH,QD...",
   "tx_hash": "tx123",
   "created_at": "2024-02-24T10:00:00Z",
   "result": {
