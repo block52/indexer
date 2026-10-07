@@ -1,5 +1,17 @@
 -- Poker Hands Indexer Schema
 -- For tracking card distribution and proving randomness
+--
+-- Privacy: only cards SHOWN at the table are stored: community cards, and the
+-- hole cards of players whose status was "showing" in the chain's masked public
+-- game state when the hand ended. Decks are never stored.
+--
+-- Randomness analysis (frequency views, chi-squared) uses COMMUNITY cards only:
+-- they are an unbiased sample of deck positions. Shown hole cards are a biased
+-- sample (only hands that reached showdown), so they're counted in
+-- hole_card_appearances but excluded from the randomness tests.
+--
+-- This file is idempotent (IF NOT EXISTS / OR REPLACE), so it can be re-applied
+-- to upgrade an existing database.
 
 -- Extension for statistical functions
 CREATE EXTENSION IF NOT EXISTS tablefunc;
@@ -14,8 +26,7 @@ CREATE TABLE IF NOT EXISTS poker_hands (
     game_id TEXT NOT NULL,
     hand_number INTEGER NOT NULL,
     block_height BIGINT NOT NULL,
-    deck_seed TEXT NOT NULL,
-    deck TEXT NOT NULL,
+    deck_seed TEXT NOT NULL, -- the block hash used as the shuffle seed (public)
     tx_hash TEXT,
     indexed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 
@@ -98,33 +109,33 @@ SELECT
     cds.card,
     cds.rank,
     cds.suit,
-    cds.total_appearances,
-    (SELECT COUNT(*) FROM revealed_cards) as total_cards_dealt,
+    cds.community_appearances AS total_appearances,
+    (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') as total_cards_dealt,
     CASE
-        WHEN (SELECT COUNT(*) FROM revealed_cards) > 0
-        THEN ROUND(cds.total_appearances::NUMERIC / (SELECT COUNT(*) FROM revealed_cards) * 100, 4)
+        WHEN (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') > 0
+        THEN ROUND(cds.community_appearances::NUMERIC / (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') * 100, 4)
         ELSE 0
     END as actual_percentage,
     ROUND(100.0 / 52, 4) as expected_percentage,
     CASE
-        WHEN (SELECT COUNT(*) FROM revealed_cards) > 0
+        WHEN (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') > 0
         THEN ROUND(
-            (cds.total_appearances::NUMERIC / (SELECT COUNT(*) FROM revealed_cards) - 1.0/52) * 100,
+            (cds.community_appearances::NUMERIC / (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') - 1.0/52) * 100,
             4
         )
         ELSE 0
     END as deviation_percentage
 FROM card_distribution_stats cds
-ORDER BY cds.total_appearances DESC;
+ORDER BY cds.community_appearances DESC;
 
 -- View: Rank distribution (aggregated by rank)
 CREATE OR REPLACE VIEW rank_distribution AS
 SELECT
     cds.rank,
-    SUM(cds.total_appearances) as total_appearances,
+    SUM(cds.community_appearances) as total_appearances,
     CASE
-        WHEN (SELECT COUNT(*) FROM revealed_cards) > 0
-        THEN ROUND(SUM(cds.total_appearances)::NUMERIC / (SELECT COUNT(*) FROM revealed_cards) * 100, 4)
+        WHEN (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') > 0
+        THEN ROUND(SUM(cds.community_appearances)::NUMERIC / (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') * 100, 4)
         ELSE 0
     END as actual_percentage,
     ROUND(100.0 / 13, 4) as expected_percentage
@@ -150,16 +161,16 @@ SELECT
         WHEN 'c' THEN 'Clubs'
         WHEN 's' THEN 'Spades'
     END as suit_name,
-    SUM(cds.total_appearances) as total_appearances,
+    SUM(cds.community_appearances) as total_appearances,
     CASE
-        WHEN (SELECT COUNT(*) FROM revealed_cards) > 0
-        THEN ROUND(SUM(cds.total_appearances)::NUMERIC / (SELECT COUNT(*) FROM revealed_cards) * 100, 4)
+        WHEN (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') > 0
+        THEN ROUND(SUM(cds.community_appearances)::NUMERIC / (SELECT COUNT(*) FROM revealed_cards WHERE card_type = 'community') * 100, 4)
         ELSE 0
     END as actual_percentage,
     ROUND(100.0 / 4, 4) as expected_percentage
 FROM card_distribution_stats cds
 GROUP BY cds.suit
-ORDER BY SUM(cds.total_appearances) DESC;
+ORDER BY SUM(cds.community_appearances) DESC;
 
 -- View: Deck seed entropy analysis
 CREATE OR REPLACE VIEW seed_entropy_analysis AS
@@ -216,7 +227,7 @@ DECLARE
     expected_per_card NUMERIC;
     chi_sq_value NUMERIC;
 BEGIN
-    SELECT COUNT(*) INTO total_cards FROM revealed_cards;
+    SELECT COUNT(*) INTO total_cards FROM revealed_cards WHERE card_type = 'community';
 
     IF total_cards = 0 THEN
         RETURN QUERY SELECT
@@ -231,7 +242,7 @@ BEGIN
     expected_per_card := total_cards::NUMERIC / 52;
 
     -- Calculate chi-squared value
-    SELECT SUM(POWER(total_appearances - expected_per_card, 2) / expected_per_card)
+    SELECT SUM(POWER(community_appearances - expected_per_card, 2) / expected_per_card)
     INTO chi_sq_value
     FROM card_distribution_stats;
 
@@ -275,7 +286,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER after_card_insert
+CREATE OR REPLACE TRIGGER after_card_insert
 AFTER INSERT ON revealed_cards
 FOR EACH ROW
 EXECUTE FUNCTION trigger_update_card_stats();

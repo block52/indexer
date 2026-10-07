@@ -65,7 +65,7 @@ DECLARE
     expected_per_suit NUMERIC;
     chi_sq_value NUMERIC;
 BEGIN
-    SELECT COUNT(*) INTO total_cards FROM revealed_cards;
+    SELECT COUNT(*) INTO total_cards FROM revealed_cards WHERE card_type = 'community';
 
     IF total_cards = 0 THEN
         RETURN QUERY SELECT
@@ -83,7 +83,7 @@ BEGIN
     SELECT SUM(POWER(total_appearances - expected_per_suit, 2) / expected_per_suit)
     INTO chi_sq_value
     FROM (
-        SELECT suit, SUM(total_appearances) as total_appearances
+        SELECT suit, SUM(community_appearances) as total_appearances
         FROM card_distribution_stats
         GROUP BY suit
     ) s;
@@ -134,7 +134,7 @@ DECLARE
     expected_per_rank NUMERIC;
     chi_sq_value NUMERIC;
 BEGIN
-    SELECT COUNT(*) INTO total_cards FROM revealed_cards;
+    SELECT COUNT(*) INTO total_cards FROM revealed_cards WHERE card_type = 'community';
 
     IF total_cards = 0 THEN
         RETURN QUERY SELECT
@@ -152,7 +152,7 @@ BEGIN
     SELECT SUM(POWER(total_appearances - expected_per_rank, 2) / expected_per_rank)
     INTO chi_sq_value
     FROM (
-        SELECT rank, SUM(total_appearances) as total_appearances
+        SELECT rank, SUM(community_appearances) as total_appearances
         FROM card_distribution_stats
         GROUP BY rank
     ) r;
@@ -256,7 +256,7 @@ DECLARE
     total_cards BIGINT;
     chi_sq NUMERIC;
 BEGIN
-    SELECT COUNT(*) INTO total_cards FROM revealed_cards;
+    SELECT COUNT(*) INTO total_cards FROM revealed_cards WHERE card_type = 'community';
 
     IF total_cards < 100 THEN
         RETURN QUERY SELECT
@@ -305,10 +305,10 @@ BEGIN
     SELECT
         'Card Coverage'::TEXT,
         CASE
-            WHEN (SELECT COUNT(DISTINCT card) FROM revealed_cards) = 52 THEN 'PASS'
+            WHEN (SELECT COUNT(DISTINCT card) FROM revealed_cards WHERE card_type = 'community') = 52 THEN 'PASS'
             ELSE 'PARTIAL'
         END::TEXT,
-        format('%s of 52 unique cards observed', (SELECT COUNT(DISTINCT card) FROM revealed_cards))::TEXT;
+        format('%s of 52 unique cards observed', (SELECT COUNT(DISTINCT card) FROM revealed_cards WHERE card_type = 'community'))::TEXT;
 END;
 $$ LANGUAGE plpgsql;
 

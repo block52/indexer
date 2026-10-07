@@ -12,8 +12,21 @@ A standalone Go indexer that fetches poker hand events from any Pokerchain node 
 
 | Event | Description |
 |-------|-------------|
-| `hand_started` | New hand dealt - captures deck seed and shuffled deck |
-| `hand_completed` | Hand finished at showdown - captures revealed cards |
+| `hand_started` | New hand dealt - records the hand and its deck seed (the block hash) |
+| `hand_completed` | Hand finished at showdown - records the community cards and the hole cards that were **shown** |
+
+### Card privacy
+
+The indexer stores and serves **only cards shown at the table**:
+
+- **No decks.** Decks are never read or stored, and the API has no `deck` field. Older chain events carry a `deck` attribute on `hand_started`; it is ignored.
+- **Community cards** come from the `hand_completed` event.
+- **Hole cards** come only from players whose status was `showing` in the chain's **masked public game state at the block where the hand ended** (`GET /block52/pokerchain/poker/v1/game_state_public/{game_id}` with the `x-cosmos-block-height` header; if the next hand started in that same block, the block before it). The event's `revealed_hole_cards` attribute is not used, because on older blocks it lists every seat's cards.
+- If the node no longer keeps state at that height (pruned history), only the community cards are stored for that hand.
+
+### Randomness analysis uses community cards only
+
+Community cards are an unbiased sample of deck positions. Shown hole cards are a **biased** sample (only hands that reached showdown), so the frequency views and chi-squared tests count community cards only. Shown hole cards are still stored and counted in `hole_card_appearances`.
 
 ### Analysis Capabilities
 
@@ -146,6 +159,29 @@ watch -n 5 'docker compose exec postgres psql -U poker -d poker_hands -c "SELECT
 # Terminal 3: API for real-time queries
 ./api
 ```
+
+### Reading from a validator's own RPC
+
+Every block costs the node a `block_results` read, and every finished hand adds historical state queries. On a small validator those reads compete with consensus. Pass `-block-delay-ms` (or set `BLOCK_DELAY_MS` for docker compose) to pause after each chain read:
+
+```bash
+# when backfilling from a validator's local RPC, use a delay (e.g. 25ms) so the node keeps up with consensus
+./indexer -node http://localhost:26657 -continuous -block-delay-ms 25
+```
+
+The default is `0` (no delay). The effective delay is logged at startup.
+
+### Upgrading an existing database
+
+Existing databases may hold decks and hole cards that were never shown. `sql/init.sql` and `sql/analysis.sql` are idempotent, so re-apply them, then run the migration:
+
+```bash
+for f in sql/init.sql sql/analysis.sql sql/05-shown-cards-only.sql; do
+  docker compose exec -T postgres psql -U poker -d poker_hands < "$f"
+done
+```
+
+The migration drops `poker_hands.deck`, deletes all stored hole cards (it can't tell which were shown), normalizes card codes, and recomputes the stats. Then re-run the indexer from your earliest block to repopulate the shown hole cards.
 
 ## Backfill Script
 

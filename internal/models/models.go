@@ -7,8 +7,7 @@ type PokerHand struct {
 	GameID      string    `json:"game_id"`
 	HandNumber  int       `json:"hand_number"`
 	BlockHeight int64     `json:"block_height"`
-	DeckSeed    string    `json:"deck_seed"`
-	Deck        string    `json:"deck"`
+	DeckSeed    string    `json:"deck_seed"` // block hash used as the shuffle seed (public)
 	TxHash      string    `json:"tx_hash"`
 	CreatedAt   time.Time `json:"created_at"`
 }
