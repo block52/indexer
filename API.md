@@ -516,6 +516,46 @@ curl "http://localhost:8000/api/v1/players/poker1abc.../sessions?limit=10"
 }
 ```
 
+### `GET /api/v1/players/:address/hands`
+
+The finished hands a wallet played, newest first (block52/ui#721 "My Hand History").
+
+A player is in a hand if the hand's own actions name them (blinds, folds, calls, …) or they won it. Seats that were busted, sitting out or waiting are not. Rows come from the public state at each hand's end, so they hold only public data; for shown hole cards use `GET /api/v1/hands/:game_id/:hand_number`.
+
+**Query Parameters:**
+- `limit` (int, optional): Results per page (default: 50, max: 1000)
+- `offset` (int, optional): Results offset (default: 0)
+
+**Example:**
+```bash
+curl "http://localhost:8000/api/v1/players/b521abc.../hands?limit=20&offset=0"
+```
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "game_id": "0x64a6...",
+      "hand_number": 13,
+      "seat": 3,
+      "status": "showing",
+      "won_amount": 120,
+      "block_height": 470120,
+      "ended_at": "2026-10-07T02:14:09Z",
+      "community_cards": ["Ah", "7d", "2c", "Ks", "9h"],
+      "winner_count": 1
+    }
+  ],
+  "pagination": { "limit": 20, "offset": 0, "total": 57 }
+}
+```
+
+- `status`: the player's status at the hand's end (`""` if they have since left the table).
+- `won_amount`: what the player won in this hand, in the table's units: chips for Sit & Go/tournament, micro-USDC for cash. `0` if they didn't win.
+- `ended_at`: block time of the hand's end.
+- Hands indexed before `sql/06-hand-players.sql` was applied have no rows until the indexer re-runs over their blocks.
+
 ---
 
 ## Error Responses

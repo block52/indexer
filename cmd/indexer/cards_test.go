@@ -126,3 +126,56 @@ func TestThrottle(t *testing.T) {
 		t.Fatal("zero delay should not sleep")
 	}
 }
+
+func TestHandPlayersFromTheHandsOwnActions(t *testing.T) {
+	// A 4-seat SNG: seat 4 busted in an earlier hand and is still listed in
+	// players[]; seat 3 joined but sat this hand out. Neither played it.
+	raw := []byte(`{"game_state":"{\"handNumber\":13,\"round\":\"end\",` +
+		`\"players\":[` +
+		`{\"address\":\"b52a\",\"seat\":1,\"status\":\"folded\"},` +
+		`{\"address\":\"b52b\",\"seat\":2,\"status\":\"active\"},` +
+		`{\"address\":\"b52c\",\"seat\":3,\"status\":\"sitting-out\"},` +
+		`{\"address\":\"b52d\",\"seat\":4,\"status\":\"busted\"}],` +
+		`\"winners\":[{\"address\":\"b52b\",\"amount\":\"120\"}],` +
+		`\"previousActions\":[` +
+		`{\"playerId\":\"b52c\",\"seat\":3,\"action\":\"sit-out\"},` +
+		`{\"playerId\":\"b52a\",\"seat\":1,\"action\":\"post-small-blind\"},` +
+		`{\"playerId\":\"b52b\",\"seat\":2,\"action\":\"post-big-blind\"},` +
+		`{\"playerId\":\"b52a\",\"seat\":1,\"action\":\"deal\"},` +
+		`{\"playerId\":\"b52a\",\"seat\":1,\"action\":\"fold\"}]}"}`)
+	snap, err := parseGameStateResponse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := handPlayers(snap)
+	want := []handPlayer{
+		{Address: "b52a", Seat: 1, Status: "folded", Won: 0},
+		{Address: "b52b", Seat: 2, Status: "active", Won: 120},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("handPlayers = %+v, want %+v", got, want)
+	}
+}
+
+func TestHandPlayersKeepsAPlayerWhoLeftAndAWinnerWithoutActions(t *testing.T) {
+	snap := &GameState{
+		Players: []Player{{Address: "b52w", Seat: 5, Status: "active"}},
+		Winners: []Winner{{Address: "b52w", Amount: "400000"}, {Address: "b52w", Amount: "100000"}},
+		PreviousActions: []HandAction{
+			{PlayerID: "b52gone", Seat: 2, Action: "post-small-blind"},
+			{PlayerID: "b52gone", Seat: 2, Action: "fold"},
+		},
+	}
+	got := handPlayers(snap)
+	want := []handPlayer{
+		{Address: "b52gone", Seat: 2, Status: "", Won: 0},
+		{Address: "b52w", Seat: 5, Status: "active", Won: 500000},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("handPlayers = %+v, want %+v", got, want)
+	}
+	if handPlayers(nil) != nil {
+		t.Error("handPlayers(nil) should be nil")
+	}
+}

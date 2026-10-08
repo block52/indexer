@@ -556,6 +556,43 @@ func (db *DB) GetPlayerSessions(playerAddress string, limit, offset int) ([]mode
 	return sessions, total, nil
 }
 
+// GetPlayerHands lists the finished hands a wallet played, newest first.
+func (db *DB) GetPlayerHands(playerAddress string, limit, offset int) ([]models.PlayerHand, int64, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	var total int64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM hand_players WHERE player_address = $1`, playerAddress).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("failed to count player hands: %w", err)
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT hp.game_id, hp.hand_number, hp.seat, hp.status, hp.won_amount, hp.block_height, hp.ended_at,
+		       COALESCE(hr.community_cards, '{}'), COALESCE(hr.winner_count, 0)
+		FROM hand_players hp
+		LEFT JOIN hand_results hr ON hr.game_id = hp.game_id AND hr.hand_number = hp.hand_number
+		WHERE hp.player_address = $1
+		ORDER BY hp.block_height DESC, hp.hand_number DESC
+		LIMIT $2 OFFSET $3
+	`, playerAddress, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query player hands: %w", err)
+	}
+	defer rows.Close()
+
+	hands := []models.PlayerHand{}
+	for rows.Next() {
+		var hand models.PlayerHand
+		if err := rows.Scan(&hand.GameID, &hand.HandNumber, &hand.Seat, &hand.Status, &hand.WonAmount, &hand.BlockHeight, &hand.EndedAt,
+			pq.Array(&hand.CommunityCards), &hand.WinnerCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan player hand: %w", err)
+		}
+		hands = append(hands, hand)
+	}
+
+	return hands, total, rows.Err()
+}
+
 // GetIndexingStatus retrieves indexing progress and statistics
 func (db *DB) GetIndexingStatus() (*models.IndexingStatus, error) {
 	ctx, cancel := getContext()

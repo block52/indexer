@@ -447,6 +447,45 @@ func (h *Handler) SearchPlayers(c *gin.Context) {
 }
 
 // GetPlayerSessions returns player game sessions
+// GetPlayerHands returns the finished hands a wallet played, newest first (ui#721).
+func (h *Handler) GetPlayerHands(c *gin.Context) {
+	playerAddress := c.Param("address")
+
+	var params models.PaginationParams
+	if err := c.ShouldBindQuery(&params); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Invalid parameters",
+			Message: err.Error(),
+			Code:    http.StatusBadRequest,
+		})
+		return
+	}
+
+	// Default pagination
+	if params.Limit == 0 {
+		params.Limit = 50
+	}
+
+	hands, total, err := h.db.GetPlayerHands(playerAddress, params.Limit, params.Offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Database error",
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	response := models.PaginatedResponse{
+		Data: hands,
+	}
+	response.Pagination.Limit = params.Limit
+	response.Pagination.Offset = params.Offset
+	response.Pagination.Total = total
+
+	c.JSON(http.StatusOK, response)
+}
+
 func (h *Handler) GetPlayerSessions(c *gin.Context) {
 	playerAddress := c.Param("address")
 
