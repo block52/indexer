@@ -87,6 +87,7 @@ func main() {
 			players.GET("", h.SearchPlayers)
 			players.GET("/:address/stats", h.GetPlayerStats)
 			players.GET("/:address/sessions", h.GetPlayerSessions)
+			players.GET("/:address/hands", h.GetPlayerHands)
 		}
 	}
 

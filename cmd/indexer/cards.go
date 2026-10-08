@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 )
 
@@ -105,4 +106,62 @@ func handEndSnapshot(fetch func(height int64) (*GameState, error), handNumber in
 		}
 	}
 	return nil, nil
+}
+
+// handPlayer is one wallet's part in a finished hand (ui#721 "My Hand History").
+type handPlayer struct {
+	Address string
+	Seat    int
+	Status  string // status at the hand's end ("" if the player has since left)
+	Won     int64  // sum of this player's winner amounts (chips or micro-USDC)
+}
+
+// nonHandActions are recorded in previousActions but don't put a player in the hand.
+var nonHandActions = map[string]bool{
+	"join": true, "leave": true, "new-hand": true, "deal": true,
+	"sit-in": true, "sit-out": true, "sit-in-and-wait": true, "top-up": true,
+	"claim-winnings": true,
+}
+
+// handPlayers lists who played a finished hand, from the masked public
+// hand-end state. The engine resets previousActions at every new hand, and
+// every player dealt in posts or acts, so the hand's own actions name its
+// players with their seats; busted or sitting-out seats never appear. Winners
+// with no recorded action (shouldn't happen) are still included.
+func handPlayers(snap *GameState) []handPlayer {
+	if snap == nil {
+		return nil
+	}
+	won := map[string]int64{}
+	for _, w := range snap.Winners {
+		amount, err := strconv.ParseInt(w.Amount, 10, 64)
+		if err == nil && w.Address != "" {
+			won[w.Address] += amount
+		}
+	}
+	status := map[string]string{}
+	seatOf := map[string]int{}
+	for _, p := range snap.Players {
+		status[p.Address] = p.Status
+		seatOf[p.Address] = p.Seat
+	}
+
+	var out []handPlayer
+	seen := map[string]bool{}
+	add := func(address string, seat int) {
+		if address == "" || seen[address] {
+			return
+		}
+		seen[address] = true
+		out = append(out, handPlayer{Address: address, Seat: seat, Status: status[address], Won: won[address]})
+	}
+	for _, a := range snap.PreviousActions {
+		if !nonHandActions[a.Action] {
+			add(a.PlayerID, a.Seat)
+		}
+	}
+	for _, w := range snap.Winners {
+		add(w.Address, seatOf[w.Address])
+	}
+	return out
 }

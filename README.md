@@ -176,12 +176,14 @@ The default is `0` (no delay). The effective delay is logged at startup.
 Existing databases may hold decks and hole cards that were never shown. `sql/init.sql` and `sql/analysis.sql` are idempotent, so re-apply them, then run the migration:
 
 ```bash
-for f in sql/init.sql sql/analysis.sql sql/05-shown-cards-only.sql; do
+for f in sql/init.sql sql/analysis.sql sql/05-shown-cards-only.sql sql/06-hand-players.sql; do
   docker compose exec -T postgres psql -U poker -d poker_hands < "$f"
 done
 ```
 
 The migration drops `poker_hands.deck`, deletes all stored hole cards (it can't tell which were shown), normalizes card codes, and recomputes the stats. Then re-run the indexer from your earliest block to repopulate the shown hole cards.
+
+`06-hand-players.sql` adds `hand_players` (who played each hand, for per-wallet hand history). Hands indexed before it was applied get rows when the indexer re-runs over their blocks.
 
 ## Backfill Script
 

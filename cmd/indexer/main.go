@@ -43,8 +43,9 @@ type BlockResult struct {
 	Result struct {
 		Block struct {
 			Header struct {
-				Height  string `json:"height"`
-				AppHash string `json:"app_hash"`
+				Height  string    `json:"height"`
+				AppHash string    `json:"app_hash"`
+				Time    time.Time `json:"time"`
 			} `json:"header"`
 			Data struct {
 				Txs []string `json:"txs"`
@@ -100,6 +101,15 @@ type GameState struct {
 	Round          string   `json:"round"`
 	HandNumber     int      `json:"handNumber"`
 	Winners        []Winner `json:"winners"`
+	// This hand's actions (the engine resets them at every new hand).
+	PreviousActions []HandAction `json:"previousActions"`
+}
+
+// HandAction is one recorded action in previousActions.
+type HandAction struct {
+	PlayerID string `json:"playerId"`
+	Seat     int    `json:"seat"`
+	Action   string `json:"action"`
 }
 
 // Player in game state
@@ -342,7 +352,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		for _, event := range events {
 			// Handle new event types (v0.1.33+)
 			if event.Type == "hand_started" || event.Type == "hand_completed" {
-				if err := idx.processNewEvent(event, height, ""); err != nil {
+				if err := idx.processNewEvent(event, height, blockInfo.Time, ""); err != nil {
 					log.Printf("Warning: failed to process event at block %d: %v", height, err)
 				} else {
 					if event.Type == "hand_started" {
@@ -377,7 +387,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 				// Check for showdown by querying game state
 				if gameID != "" && (action == "show" || action == "muck" || action == "fold") {
-					if err := idx.checkAndHandleShowdown(gameID, height); err != nil {
+					if err := idx.checkAndHandleShowdown(gameID, height, blockInfo.Time); err != nil {
 						// Don't log every error - showdowns are rare
 						if strings.Contains(err.Error(), "showdown") {
 							showdownsFound++
@@ -423,6 +433,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 type BlockInfo struct {
 	Height  int64
 	AppHash string
+	Time    time.Time
 }
 
 // fetchBlockWithEvents gets block info and events
@@ -462,6 +473,7 @@ func (idx *Indexer) fetchBlockWithEvents(height int64) (*BlockInfo, []Event, err
 	blockInfo := &BlockInfo{
 		Height:  height,
 		AppHash: blockResult.Result.Block.Header.AppHash,
+		Time:    blockResult.Result.Block.Header.Time,
 	}
 
 	var events []Event
@@ -509,7 +521,7 @@ func (idx *Indexer) handleNewHandAction(attrs map[string]string, blockHeight int
 
 // checkAndHandleShowdown checks if the game reached showdown at this block and
 // records the shown cards (legacy chains without hand_completed events).
-func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64) error {
+func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64, blockTime time.Time) error {
 	gameState, err := idx.queryGameStateAt(gameID, blockHeight)
 	if err != nil {
 		return err
@@ -524,6 +536,7 @@ func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64) err
 		len(gameState.Winners), shownHoleCards(gameState.Players), ""); err != nil {
 		return err
 	}
+	idx.recordHandPlayers(gameID, gameState.HandNumber, blockHeight, blockTime, handPlayers(gameState))
 	return fmt.Errorf("showdown processed") // Signal that we found one
 }
 
@@ -556,6 +569,26 @@ func (idx *Indexer) recordHandResult(gameID string, handNumber int, blockHeight 
 		`, gameID, handNumber, blockHeight, card, i)
 	}
 	return nil
+}
+
+// recordHandPlayers stores who played a finished hand, for per-wallet hand
+// history (ui#721). Re-indexing a hand replaces its rows.
+func (idx *Indexer) recordHandPlayers(gameID string, handNumber int, blockHeight int64, blockTime time.Time, players []handPlayer) {
+	var endedAt interface{}
+	if !blockTime.IsZero() {
+		endedAt = blockTime
+	}
+	for _, p := range players {
+		if _, err := idx.db.Exec(`
+			INSERT INTO hand_players (game_id, hand_number, player_address, seat, status, won_amount, block_height, ended_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (game_id, hand_number, player_address) DO UPDATE SET
+				seat = EXCLUDED.seat, status = EXCLUDED.status, won_amount = EXCLUDED.won_amount,
+				block_height = EXCLUDED.block_height, ended_at = EXCLUDED.ended_at
+		`, gameID, handNumber, p.Address, p.Seat, p.Status, p.Won, blockHeight, endedAt); err != nil {
+			log.Printf("Hand %s/%d: failed to record player %s: %v", gameID, handNumber, p.Address, err)
+		}
+	}
 }
 
 // queryGameStateAt fetches the masked public game state from the REST API, as
@@ -619,14 +652,14 @@ func (idx *Indexer) throttle() {
 }
 
 // processNewEvent handles the new hand_started/hand_completed events (v0.1.33+)
-func (idx *Indexer) processNewEvent(event Event, blockHeight int64, txHash string) error {
+func (idx *Indexer) processNewEvent(event Event, blockHeight int64, blockTime time.Time, txHash string) error {
 	attrs := idx.parseEventAttrs(event)
 
 	switch event.Type {
 	case "hand_started":
 		return idx.handleHandStarted(attrs, blockHeight, txHash)
 	case "hand_completed":
-		return idx.handleHandCompleted(attrs, blockHeight, txHash)
+		return idx.handleHandCompleted(attrs, blockHeight, blockTime, txHash)
 	}
 	return nil
 }
@@ -658,7 +691,7 @@ func (idx *Indexer) handleHandStarted(attrs map[string]string, blockHeight int64
 // from the event; hole cards ONLY from the masked public state at the hand's
 // end (players with status "showing"). The event's revealed_hole_cards is
 // ignored: on older blocks it lists every seat's cards, folded ones included.
-func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int64, txHash string) error {
+func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int64, blockTime time.Time, txHash string) error {
 	gameID := attrs["game_id"]
 	handNumber, _ := strconv.Atoi(attrs["hand_number"])
 	winnerCount, _ := strconv.Atoi(attrs["winner_count"])
@@ -685,6 +718,7 @@ func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int
 		if len(community) == 0 {
 			community = normalizeCards(snap.CommunityCards)
 		}
+		idx.recordHandPlayers(gameID, handNumber, blockHeight, blockTime, handPlayers(snap))
 	}
 
 	return idx.recordHandResult(gameID, handNumber, blockHeight, community, winnerCount, shown, txHash)

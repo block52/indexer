@@ -183,6 +183,19 @@ type PlayerSession struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+// PlayerHand is one finished hand a wallet played (ui#721 "My Hand History").
+type PlayerHand struct {
+	GameID         string     `json:"game_id"`
+	HandNumber     int        `json:"hand_number"`
+	Seat           int        `json:"seat"`
+	Status         string     `json:"status"`     // status at the hand's end ("" if since left)
+	WonAmount      int64      `json:"won_amount"` // chips (SNG/tournament) or micro-USDC (cash)
+	BlockHeight    int64      `json:"block_height"`
+	EndedAt        *time.Time `json:"ended_at,omitempty"` // block time of the hand's end
+	CommunityCards []string   `json:"community_cards"`
+	WinnerCount    int        `json:"winner_count"`
+}
+
 // TimelineDataPoint represents distribution over time
 type TimelineDataPoint struct {
 	BlockRange string  `json:"block_range"`
