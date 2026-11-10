@@ -32,6 +32,10 @@ func (b *builder) alias() string {
 
 func ident(s string) string { return pq.QuoteIdentifier(s) }
 
+// from is the schema-qualified relation a table is read from: the api views,
+// or the public tables on a database without them (#17).
+func (b *builder) from(t *Table) string { return ident(b.cat.Schema) + "." + ident(t.Spec.Name) }
+
 func col(alias, name string) string { return alias + "." + ident(name) }
 
 // errorf makes a GraphQL error message for a bad request.
@@ -101,8 +105,8 @@ func (b *builder) list(t *Table, f *field, join [][2]string, parent string, dept
 		inner[i] = o.expr + " " + o.dir
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM public.%s %s WHERE %s ORDER BY %s LIMIT %d",
-		strings.Join(proj, ", "), ident(t.Spec.Name), a, strings.Join(conds, " AND "), strings.Join(inner, ", "), limit)
+	sql := fmt.Sprintf("SELECT %s FROM %s %s WHERE %s ORDER BY %s LIMIT %d",
+		strings.Join(proj, ", "), b.from(t), a, strings.Join(conds, " AND "), strings.Join(inner, ", "), limit)
 	if offset > 0 {
 		sql += fmt.Sprintf(" OFFSET %d", offset)
 	}
@@ -159,7 +163,7 @@ func (b *builder) one(t *Table, f *field, join [][2]string, parent string, depth
 	for i, p := range join {
 		conds[i] = col(a, p[1]) + " = " + col(parent, p[0])
 	}
-	return fmt.Sprintf("(SELECT %s FROM public.%s %s WHERE %s LIMIT 1)", obj, ident(t.Spec.Name), a, strings.Join(conds, " AND ")), nil
+	return fmt.Sprintf("(SELECT %s FROM %s %s WHERE %s LIMIT 1)", obj, b.from(t), a, strings.Join(conds, " AND ")), nil
 }
 
 // buildObject turns key/value pairs into a jsonb object. jsonb_build_object
@@ -319,7 +323,7 @@ func (b *builder) where(t *Table, a string, v interface{}) (string, error) {
 			for i, p := range r.On {
 				join[i] = col(ra, p[1]) + " = " + col(a, p[0])
 			}
-			conds = append(conds, fmt.Sprintf("EXISTS (SELECT 1 FROM public.%s %s WHERE %s AND %s)", ident(target.Spec.Name), ra, strings.Join(join, " AND "), inner))
+			conds = append(conds, fmt.Sprintf("EXISTS (SELECT 1 FROM %s %s WHERE %s AND %s)", b.from(target), ra, strings.Join(join, " AND "), inner))
 		}
 	}
 	if len(conds) == 0 {
@@ -475,5 +479,5 @@ func compileAggregate(cat *Catalog, lim Limits, t *Table, p graphql.ResolveParam
 		}
 		outer = append(outer, quoteLit(relKey(af.key)), buildObject(inner))
 	}
-	return fmt.Sprintf("SELECT %s FROM public.%s %s WHERE %s", buildObject(outer), ident(t.Spec.Name), a, where), b.args, nil
+	return fmt.Sprintf("SELECT %s FROM %s %s WHERE %s", buildObject(outer), b.from(t), a, where), b.args, nil
 }

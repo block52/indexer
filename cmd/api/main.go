@@ -165,7 +165,10 @@ func mountGraphQL(router *gin.Engine, cfg Config, main *db.DB) error {
 	}
 	keys := apikey.NewStore(main.DB, time.Minute)
 	router.POST("/graphql", apikey.Middleware(keys), svc.Handle)
-	log.Printf("GraphQL on POST /graphql: %d tables, %s timeout, limit %d (max %d)", len(cat.Order), cfg.GraphQL.Timeout, cfg.GraphQL.Limits.DefaultLimit, cfg.GraphQL.Limits.MaxLimit)
+	log.Printf("GraphQL on POST /graphql: %d tables from schema %s, %s timeout, limit %d (max %d)", len(cat.Order), cat.Schema, cfg.GraphQL.Timeout, cfg.GraphQL.Limits.DefaultLimit, cfg.GraphQL.Limits.MaxLimit)
+	if cat.Schema != "api" {
+		log.Printf("GraphQL is serving from public tables; run sql/09-api-views.sql for the stable api schema (#17)")
+	}
 	if cfg.GraphQL.GraphiQL {
 		graphiql.Mount(router)
 		log.Printf("GraphiQL on GET /graphiql")
