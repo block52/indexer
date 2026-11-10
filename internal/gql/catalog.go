@@ -189,6 +189,10 @@ type Table struct {
 type Catalog struct {
 	Tables map[string]*Table
 	Order  []string // table names, sorted, for deterministic schema output
+	// Schema is where the queries read from: the api schema of views
+	// (sql/09-api-views.sql, block52/indexer#17), or public on a database
+	// that doesn't have it yet.
+	Schema string
 }
 
 // Column returns the named column, or nil.
@@ -204,21 +208,43 @@ func (t *Table) Relation(name string) *Relation {
 	return nil
 }
 
-// LoadCatalog reads the columns of every spec'd table from the database.
+// LoadCatalog reads the columns of every spec'd table from the database. It
+// serves from the api schema of views (sql/09-api-views.sql, #17); a database
+// that doesn't have it yet falls back to the public tables.
 func LoadCatalog(ctx context.Context, db *sql.DB, specs []TableSpec) (*Catalog, error) {
 	names := make([]string, len(specs))
 	for i, s := range specs {
 		names[i] = s.Name
+	}
+	for _, schema := range []string{"api", "public"} {
+		cols, err := readColumns(ctx, db, schema, names)
+		if err != nil {
+			return nil, err
+		}
+		if len(cols) == 0 {
+			continue
+		}
+		cat := BuildCatalog(specs, cols)
+		cat.Schema = schema
+		return cat, nil
+	}
+	return BuildCatalog(specs, nil), nil
+}
+
+func readColumns(ctx context.Context, db *sql.DB, schema string, names []string) (map[string][]Column, error) {
+	kind := "BASE TABLE"
+	if schema == "api" {
+		kind = "VIEW"
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT c.table_name, c.column_name, c.udt_name,
 		       COALESCE(col_description(format('%I.%I', c.table_schema, c.table_name)::regclass, c.ordinal_position), '')
 		FROM information_schema.columns c
 		JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
-		WHERE c.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND c.table_name = ANY($1)
-		ORDER BY c.table_name, c.ordinal_position`, pqStringArray(names))
+		WHERE c.table_schema = $2 AND t.table_type = $3 AND c.table_name = ANY($1)
+		ORDER BY c.table_name, c.ordinal_position`, pqStringArray(names), schema, kind)
 	if err != nil {
-		return nil, fmt.Errorf("reading columns: %w", err)
+		return nil, fmt.Errorf("reading %s columns: %w", schema, err)
 	}
 	defer rows.Close()
 	cols := map[string][]Column{}
@@ -233,14 +259,14 @@ func LoadCatalog(ctx context.Context, db *sql.DB, specs []TableSpec) (*Catalog, 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return BuildCatalog(specs, cols), nil
+	return cols, nil
 }
 
 // BuildCatalog joins specs with columns (table → columns). Columns of a type
 // the API can't represent are left out; so are tables with no columns, and
 // relations whose target table or join columns are missing.
 func BuildCatalog(specs []TableSpec, cols map[string][]Column) *Catalog {
-	cat := &Catalog{Tables: map[string]*Table{}}
+	cat := &Catalog{Tables: map[string]*Table{}, Schema: "public"}
 	for _, s := range specs {
 		cs := cols[s.Name]
 		if len(cs) == 0 {

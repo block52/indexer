@@ -595,6 +595,18 @@ Run `sql/08-api-keys.sql` once before first use (it's safe to run again). Withou
 
 A browser explorer for `/graphql`: browse the schema, read the column docs and run queries. Put your API key in the **Headers** panel (`{"Authorization": "Bearer …"}`); without one, queries get the same `401` as `/graphql`, and the same limits and per-key rate apply. The examples below are pre-loaded as tabs. The page and its assets are served by the API itself — nothing loads from a third party, and no key or connection detail is in the page. Set `GRAPHIQL_ENABLED=false` to turn the page off (404) without touching `/graphql`.
 
+### The `api` schema, and what we promise about it
+
+GraphQL serves from `api`, a Postgres schema of views over the tables the indexer writes to (`sql/09-api-views.sql`, safe to run again). Storage can change underneath — a renamed column keeps its old name as a view alias — so a query that works today keeps working.
+
+**Deprecation policy:** a field that's going away is first marked deprecated in the GraphQL schema (clients see it in introspection) and keeps answering for at least one release before it's removed. Brand-new fields may appear at any time; existing fields don't change meaning or units.
+
+On a database without the `api` schema the API falls back to serving the `public` tables directly and logs a line saying so; run `sql/09-api-views.sql` to get the stable schema. The migration also creates an `indexer_ro` role that can read `api` and nothing else — point `GRAPHQL_DB_USER` at it for defence in depth after giving it a login by hand:
+
+```sql
+ALTER ROLE indexer_ro LOGIN PASSWORD '…';
+```
+
 ### What you can query
 
 Every root field is a table: `poker_hands`, `hand_results`, `revealed_cards`, `hand_players`, `player_actions`, `player_sessions`, `player_stats`, `player_monthly_stats`, `vip_tier_history`, `card_distribution_stats`, `indexing_progress`, plus `hands_meta` and `games` once `sql/07-club-reporting.sql` (#15) is applied. Columns come from the database, so new columns appear without a code change. Introspection is on, so any GraphQL client (Altair, Insomnia, Postman, `graphql-codegen`) can show the schema.
