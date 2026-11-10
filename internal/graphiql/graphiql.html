@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Block52 indexer — GraphiQL</title>
+    <link rel="stylesheet" href="/graphiql/static/graphiql.min.css" />
+    <style>
+      body { margin: 0; }
+      #graphiql { height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="graphiql">Loading…</div>
+    <script src="/graphiql/static/react.production.min.js"></script>
+    <script src="/graphiql/static/react-dom.production.min.js"></script>
+    <script src="/graphiql/static/graphiql.min.js"></script>
+    <script>
+      // The same example queries as API.md's "GraphQL" section. Put your API
+      // key in the Headers panel; it is sent to /graphql and nowhere else.
+      const defaultTabs = [
+        {
+          query: `# A player's last 20 hands, with the board and what they won.
+query ($player: String!) {
+  hand_players(where: {player_address: {_eq: $player}}, order_by: {block_height: desc}, limit: 20) {
+    game_id
+    hand_number
+    won_amount
+    ended_at
+    hand { result { community_cards winner_count } }
+  }
+}`,
+          variables: `{\n  "player": "b521…"\n}`
+        },
+        {
+          query: `# Hands at a table where a given player won something, with everyone's result.
+{
+  poker_hands(where: {game_id: {_eq: "0x…"}, players: {player_address: {_eq: "b521…"}, won_amount: {_gt: 0}}}) {
+    hand_number
+    players(order_by: {won_amount: desc}) { player_address seat won_amount }
+  }
+}`
+        },
+        {
+          query: `# Total won across all hands this month.
+{ hand_players_aggregate(where: {ended_at: {_gte: "2026-11-01"}}) { aggregate { count sum { won_amount } } } }`
+        }
+      ];
+
+      // Each tab has its own headers, so switching tabs would lose a typed
+      // key. Remember the last real key from any tab's Headers panel (in this
+      // browser only) and use it when a tab still shows the placeholder.
+      const PLACEHOLDER = "paste-your-api-key-here";
+      const AUTH_KEY = "block52:graphiql:auth";
+      const baseFetcher = GraphiQL.createFetcher({ url: "/graphql" });
+      const fetcher = (graphQLParams, opts = {}) => {
+        const headers = { ...(opts.headers || {}) };
+        const auth = headers.Authorization || headers.authorization;
+        if (auth && !auth.includes(PLACEHOLDER)) {
+          localStorage.setItem(AUTH_KEY, auth);
+        } else {
+          const saved = localStorage.getItem(AUTH_KEY);
+          if (saved) {
+            delete headers.authorization;
+            headers.Authorization = saved;
+          }
+        }
+        return baseFetcher(graphQLParams, { ...opts, headers });
+      };
+      ReactDOM.createRoot(document.getElementById("graphiql")).render(
+        React.createElement(GraphiQL, {
+          fetcher,
+          defaultTabs,
+          defaultEditorToolsVisibility: "headers",
+          shouldPersistHeaders: true,
+          defaultHeaders: '{\n  "Authorization": "Bearer paste-your-api-key-here"\n}'
+        })
+      );
+    </script>
+  </body>
+</html>
