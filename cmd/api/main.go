@@ -11,6 +11,7 @@ import (
 	"github.com/block52/indexer/internal/apikey"
 	"github.com/block52/indexer/internal/db"
 	"github.com/block52/indexer/internal/gql"
+	"github.com/block52/indexer/internal/graphiql"
 	"github.com/block52/indexer/internal/handlers"
 	"github.com/block52/indexer/internal/middleware"
 	"github.com/gin-contrib/cors"
@@ -134,6 +135,9 @@ type GraphQLConfig struct {
 	DB      db.Config
 	Timeout time.Duration
 	Limits  gql.Limits
+	// GraphiQL serves the explorer page at GET /graphiql (#18). It can be
+	// turned off with GRAPHIQL_ENABLED=false without a redeploy of the code.
+	GraphiQL bool
 }
 
 // mountGraphQL reads the table columns, builds the schema and adds the route.
@@ -162,6 +166,10 @@ func mountGraphQL(router *gin.Engine, cfg Config, main *db.DB) error {
 	keys := apikey.NewStore(main.DB, time.Minute)
 	router.POST("/graphql", apikey.Middleware(keys), svc.Handle)
 	log.Printf("GraphQL on POST /graphql: %d tables, %s timeout, limit %d (max %d)", len(cat.Order), cfg.GraphQL.Timeout, cfg.GraphQL.Limits.DefaultLimit, cfg.GraphQL.Limits.MaxLimit)
+	if cfg.GraphQL.GraphiQL {
+		graphiql.Mount(router)
+		log.Printf("GraphiQL on GET /graphiql")
+	}
 	return nil
 }
 
@@ -186,10 +194,11 @@ func loadConfig() Config {
 	limits.MaxLimit = getEnvInt("GRAPHQL_MAX_LIMIT", limits.MaxLimit)
 	return Config{
 		GraphQL: GraphQLConfig{
-			Enabled: getEnv("GRAPHQL_ENABLED", "true") == "true",
-			DB:      gqlDB,
-			Timeout: time.Duration(getEnvInt("GRAPHQL_TIMEOUT_MS", 5000)) * time.Millisecond,
-			Limits:  limits,
+			Enabled:  getEnv("GRAPHQL_ENABLED", "true") == "true",
+			DB:       gqlDB,
+			Timeout:  time.Duration(getEnvInt("GRAPHQL_TIMEOUT_MS", 5000)) * time.Millisecond,
+			Limits:   limits,
+			GraphiQL: getEnv("GRAPHIQL_ENABLED", "true") == "true",
 		},
 		Port:        getEnv("API_PORT", "8000"),
 		Environment: getEnv("ENVIRONMENT", "development"),

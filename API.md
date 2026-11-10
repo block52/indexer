@@ -50,6 +50,7 @@ The API will be available at `http://localhost:8000`
 | `GRAPHQL_DB_MAX_CONNS` | Max DB connections for GraphQL (a separate pool) | `5` |
 | `GRAPHQL_TIMEOUT_MS` | Longest a GraphQL query may run | `5000` |
 | `GRAPHQL_DEFAULT_LIMIT` / `GRAPHQL_MAX_LIMIT` | Rows per list when none is asked for / at most | `100` / `1000` |
+| `GRAPHIQL_ENABLED` | Serve the GraphiQL explorer at `GET /graphiql` | `true` |
 
 ## API Endpoints
 
@@ -589,6 +590,10 @@ go build -o apikey ./cmd/apikey
 ```
 
 Run `sql/08-api-keys.sql` once before first use (it's safe to run again). Without it, the API logs `GraphQL disabled` and serves REST as usual.
+
+### GraphiQL: `GET /graphiql`
+
+A browser explorer for `/graphql`: browse the schema, read the column docs and run queries. Put your API key in the **Headers** panel (`{"Authorization": "Bearer …"}`); without one, queries get the same `401` as `/graphql`, and the same limits and per-key rate apply. The examples below are pre-loaded as tabs. The page and its assets are served by the API itself — nothing loads from a third party, and no key or connection detail is in the page. Set `GRAPHIQL_ENABLED=false` to turn the page off (404) without touching `/graphql`.
 
 ### What you can query
 
