@@ -10,24 +10,28 @@
 -- once it is added here. When sql/07-club-reporting.sql (#15) lands, add
 -- api.hands_meta and api.games the same way.
 --
+-- created_at (poker_hands, hand_results, revealed_cards) is deliberately not
+-- here: the production database never had it (init.sql grew it without a
+-- migration), and indexed_at says the same thing.
+--
 -- Safe to run again. Run after init.sql, indexing_progress.sql,
 -- player_stats.sql, 05, 06 and 08.
 
 CREATE SCHEMA IF NOT EXISTS api;
 
 CREATE OR REPLACE VIEW api.poker_hands AS
-    SELECT id, game_id, hand_number, block_height, deck_seed, tx_hash, indexed_at, created_at
+    SELECT id, game_id, hand_number, block_height, deck_seed, tx_hash, indexed_at
     FROM public.poker_hands;
 COMMENT ON COLUMN api.poker_hands.deck_seed IS 'The public shuffle seed: the hash of the block the hand was dealt in.';
 COMMENT ON COLUMN api.poker_hands.block_height IS 'The block the hand was dealt in.';
 
 CREATE OR REPLACE VIEW api.hand_results AS
-    SELECT id, game_id, hand_number, block_height, community_cards, winner_count, tx_hash, indexed_at, created_at
+    SELECT id, game_id, hand_number, block_height, community_cards, winner_count, tx_hash, indexed_at
     FROM public.hand_results;
 COMMENT ON COLUMN api.hand_results.community_cards IS 'The board, e.g. {As,Kd,7h,2c,9s}; empty if the hand ended before the flop.';
 
 CREATE OR REPLACE VIEW api.revealed_cards AS
-    SELECT id, game_id, hand_number, block_height, card, card_type, position, indexed_at, created_at
+    SELECT id, game_id, hand_number, block_height, card, card_type, position, indexed_at
     FROM public.revealed_cards;
 COMMENT ON COLUMN api.revealed_cards.card_type IS 'community, or hole for a hole card shown at showdown. Unshown cards are never stored.';
 
