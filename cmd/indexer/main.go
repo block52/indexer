@@ -33,6 +33,10 @@ type Config struct {
 	StartBlock int64
 	EndBlock   int64
 	BatchSize  int
+	// TransfersOnly records bank transfers and nothing else, and leaves the
+	// indexing checkpoint alone: for backfilling the transfers table over blocks
+	// already indexed (sql/10-transfers.sql).
+	TransfersOnly bool
 	// BlockDelay pauses after each chain read (block_results, historical state
 	// queries) so a backfill can't starve the node it reads from.
 	BlockDelay time.Duration
@@ -63,6 +67,8 @@ type BlockResultsResponse struct {
 		} `json:"txs_results"`
 		BeginBlockEvents []Event `json:"begin_block_events"`
 		EndBlockEvents   []Event `json:"end_block_events"`
+		// CometBFT 0.38+ reports block-level events here instead of begin/end.
+		FinalizeBlockEvents []Event `json:"finalize_block_events"`
 	} `json:"result"`
 }
 
@@ -142,6 +148,7 @@ func main() {
 	batchSize := flag.Int("batch", 100, "Blocks per batch")
 	continuous := flag.Bool("continuous", false, "Run continuously, resuming from last indexed block")
 	loopDelay := flag.Int("loop-delay", 60, "Seconds to wait between indexing runs in continuous mode")
+	transfersOnly := flag.Bool("transfers-only", false, "Record bank transfers only, without touching the indexing checkpoint (backfill the transfers table over blocks already indexed)")
 	blockDelayMs := flag.Int("block-delay-ms", 0, "Milliseconds to pause after each chain read (0 = none). Use ~25 when backfilling from a validator's local RPC so it keeps up with consensus")
 
 	flag.Parse()
@@ -175,6 +182,8 @@ func main() {
 		EndBlock:   *endBlock,
 		BatchSize:  *batchSize,
 		BlockDelay: time.Duration(*blockDelayMs) * time.Millisecond,
+
+		TransfersOnly: *transfersOnly,
 	}
 
 	// Connect to database
@@ -346,6 +355,16 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			continue
 		}
 
+		// Every bank transfer in the block (sql/10-transfers.sql).
+		idx.recordTransfers(extractTransfers(blockInfo))
+		if idx.config.TransfersOnly {
+			processed++
+			if processed%1000 == 0 {
+				log.Printf("Transfers backfill: %d/%d blocks (at %d)", processed, totalBlocks, height)
+			}
+			continue
+		}
+
 		// Update progress tracking after each block
 		idx.updateProgress(height)
 
@@ -422,7 +441,10 @@ func (idx *Indexer) Run(ctx context.Context) error {
 	}
 
 	// Force a final progress update so the checkpoint is always saved at end of batch
-	idx.forceUpdateProgress(idx.config.EndBlock)
+	// (not for a transfers-only backfill, which must not move the main indexer's checkpoint).
+	if !idx.config.TransfersOnly {
+		idx.forceUpdateProgress(idx.config.EndBlock)
+	}
 
 	log.Printf("Finished: %d blocks, %d actions, %d new-hands, %d showdowns",
 		processed, actionsFound, newHandsFound, showdownsFound)
@@ -434,6 +456,10 @@ type BlockInfo struct {
 	Height  int64
 	AppHash string
 	Time    time.Time
+	// The block's transactions (base64) and each one's events, in the same order, and its block-level events.
+	Txs            []string
+	TxEvents       [][]Event
+	FinalizeEvents []Event
 }
 
 // fetchBlockWithEvents gets block info and events
@@ -470,20 +496,31 @@ func (idx *Indexer) fetchBlockWithEvents(height int64) (*BlockInfo, []Event, err
 		return nil, nil, fmt.Errorf("block JSON decode failed: %w", err)
 	}
 
+	blockInfo, events := blockInfoFrom(height, &result, &blockResult)
+	return blockInfo, events, nil
+}
+
+// blockInfoFrom reads the two RPC answers for a block: its header, transactions and events (each
+// transaction's, in order, and the block-level finalize events), and the flat event list the poker
+// handlers walk (transactions, then begin/end block events, as before).
+func blockInfoFrom(height int64, result *BlockResultsResponse, blockResult *BlockResult) (*BlockInfo, []Event) {
 	blockInfo := &BlockInfo{
-		Height:  height,
-		AppHash: blockResult.Result.Block.Header.AppHash,
-		Time:    blockResult.Result.Block.Header.Time,
+		Height:         height,
+		AppHash:        blockResult.Result.Block.Header.AppHash,
+		Time:           blockResult.Result.Block.Header.Time,
+		Txs:            blockResult.Result.Block.Data.Txs,
+		FinalizeEvents: result.Result.FinalizeBlockEvents,
 	}
 
 	var events []Event
 	for _, txResult := range result.Result.TxsResults {
 		events = append(events, txResult.Events...)
+		blockInfo.TxEvents = append(blockInfo.TxEvents, txResult.Events)
 	}
 	events = append(events, result.Result.BeginBlockEvents...)
 	events = append(events, result.Result.EndBlockEvents...)
 
-	return blockInfo, events, nil
+	return blockInfo, events
 }
 
 // parseEventAttrs extracts attributes from an event

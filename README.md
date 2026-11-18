@@ -218,6 +218,14 @@ The `backfill.sh` script handles everything:
 DB_HOST=db.example.com DB_PASS=secret ./backfill.sh http://localhost:26657
 ```
 
+### Backfilling transfers
+
+`sql/10-transfers.sql` adds the `transfers` table (every bank transfer: sends and deposits, buy-ins and cash-outs, fees), which the indexer fills for every block it reads from then on. For blocks it read before, run a transfers-only pass. It records transfers and nothing else, never moves the indexing checkpoint, and is safe to repeat (each transfer is stored once):
+
+```bash
+./indexer -node http://localhost:26657 -start 1 -end <last indexed block> -transfers-only -block-delay-ms 25
+```
+
 ## Continuous Indexing (Cron)
 
 The indexer is a one-time backfill tool that exits after processing blocks. For continuous indexing, use the cron setup script:

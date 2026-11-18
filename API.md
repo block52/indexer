@@ -609,7 +609,7 @@ ALTER ROLE indexer_ro LOGIN PASSWORD '…';
 
 ### What you can query
 
-Every root field is a table: `poker_hands`, `hand_results`, `revealed_cards`, `hand_players`, `player_actions`, `player_sessions`, `player_stats`, `player_monthly_stats`, `vip_tier_history`, `card_distribution_stats`, `indexing_progress`, plus `hands_meta` and `games` once `sql/07-club-reporting.sql` (#15) is applied. Columns come from the database, so new columns appear without a code change. Introspection is on, so any GraphQL client (Altair, Insomnia, Postman, `graphql-codegen`) can show the schema.
+Every root field is a table: `poker_hands`, `hand_results`, `revealed_cards`, `hand_players`, `player_actions`, `player_sessions`, `player_stats`, `player_monthly_stats`, `vip_tier_history`, `card_distribution_stats`, `indexing_progress`, `transfers` (once `sql/10-transfers.sql` is applied), plus `hands_meta` and `games` once `sql/07-club-reporting.sql` (#15) is applied. Columns come from the database, so new columns appear without a code change. Introspection is on, so any GraphQL client (Altair, Insomnia, Postman, `graphql-codegen`) can show the schema.
 
 | Argument | |
 |---|---|
@@ -636,6 +636,23 @@ query ($player: String!) {
     ended_at
     hand { result { community_cards winner_count } }
   }
+}
+```
+
+A wallet's money in and out: every USDC transfer it sent or received, with the message that moved it. `msg_type` tells them apart: `/cosmos.bank.v1beta1.MsgSend` is a send or deposit, `/pokerchain.poker.v1.MsgJoinGame` a buy-in into the poker module, `/pokerchain.poker.v1.MsgLeaveGame` a cash-out. `amount` is micro-USDC.
+
+```graphql
+query ($wallet: String!, $since: Timestamp) {
+  transfers(where: {_or: [{sender: {_eq: $wallet}}, {recipient: {_eq: $wallet}}], denom: {_eq: "usdc"}, block_time: {_gte: $since}}, order_by: {block_height: desc}) {
+    block_height
+    block_time
+    tx_hash
+    msg_type
+    sender
+    recipient
+    amount
+  }
+  deposits: transfers_aggregate(where: {recipient: {_eq: $wallet}, msg_type: {_eq: "/cosmos.bank.v1beta1.MsgSend"}, denom: {_eq: "usdc"}}) { aggregate { count sum { amount } } }
 }
 ```
 

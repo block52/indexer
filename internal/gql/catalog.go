@@ -148,6 +148,11 @@ var Specs = []TableSpec{
 		Key:         []string{"id"},
 	},
 	{
+		Name:        "transfers",
+		Description: "Every bank transfer on the chain, one row per coin: sends and deposits (msg_type /cosmos.bank.v1beta1.MsgSend), buy-ins and cash-outs (MsgJoinGame / MsgLeaveGame), fees and block-level movements. Filter on sender or recipient for one wallet's money in and out.",
+		Key:         []string{"id"},
+	},
+	{
 		Name:        "hands_meta",
 		Description: "Per-hand totals: rake, pot, blinds, players dealt and whether the hand saw a flop.",
 		Key:         []string{"game_id", "hand_number"},
