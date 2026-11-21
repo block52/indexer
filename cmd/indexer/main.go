@@ -310,6 +310,7 @@ type Indexer struct {
 	config       Config
 	client       *http.Client
 	seenNewHands map[string]bool // track game_id to avoid duplicate queries
+	seenHandEnds map[string]bool // game_id/hand_number already end-processed this run
 }
 
 // NewIndexer creates a new indexer
@@ -319,6 +320,7 @@ func NewIndexer(db *sql.DB, config Config) *Indexer {
 		config:       config,
 		client:       &http.Client{Timeout: 30 * time.Second},
 		seenNewHands: make(map[string]bool),
+		seenHandEnds: make(map[string]bool),
 	}
 }
 
@@ -350,8 +352,11 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		idx.updateProgress(height)
 
 		for _, event := range events {
-			// Handle new event types (v0.1.33+)
-			if event.Type == "hand_started" || event.Type == "hand_completed" {
+			// Handle new event types (v0.1.33+). hand_ended is processed like
+			// hand_completed: it carries the same attributes and was the only
+			// end-of-hand event while pokerchain#415 suppressed hand_completed
+			// (indexer#10) — processHandEnded dedupes when both fire.
+			if event.Type == "hand_started" || event.Type == "hand_completed" || event.Type == "hand_ended" {
 				if err := idx.processNewEvent(event, height, blockInfo.Time, ""); err != nil {
 					log.Printf("Warning: failed to process event at block %d: %v", height, err)
 				} else {
@@ -663,7 +668,15 @@ func (idx *Indexer) processNewEvent(event Event, blockHeight int64, blockTime ti
 	switch event.Type {
 	case "hand_started":
 		return idx.handleHandStarted(attrs, blockHeight, txHash)
-	case "hand_completed":
+	case "hand_completed", "hand_ended":
+		// The two fire together on current chains; the first one processed
+		// does the work and the other is skipped (upserts would make the
+		// repeat harmless, but each costs a hand-end state query).
+		key := fmt.Sprintf("%s/%s", attrs["game_id"], attrs["hand_number"])
+		if idx.seenHandEnds[key] {
+			return nil
+		}
+		idx.seenHandEnds[key] = true
 		return idx.handleHandCompleted(attrs, blockHeight, blockTime, txHash)
 	}
 	return nil

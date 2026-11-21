@@ -351,8 +351,8 @@ func (db *DB) GetOutlierCards(threshold float64) ([]models.CardStats, error) {
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT * FROM card_frequency_analysis
-		WHERE ABS(deviation_percent) > $1
-		ORDER BY ABS(deviation_percent) DESC
+		WHERE ABS(deviation_percentage) > $1
+		ORDER BY ABS(deviation_percentage) DESC
 	`, threshold)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outlier cards: %w", err)
