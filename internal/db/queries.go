@@ -403,16 +403,20 @@ func (db *DB) GetPlayerProfile(playerAddress string) (*models.PlayerProfile, err
 	p := &models.PlayerProfile{PlayerAddress: playerAddress, VipTier: "bronze"}
 
 	// Live volume/money — always fresh, independent of the aggregate refresh.
-	// Sessions and actions are aggregated separately: joining the two tables on
-	// player_address alone cross-multiplies every session row by the action
-	// count, inflating SUMs and COUNTs.
+	// Sessions, actions and tournament entries are aggregated separately:
+	// joining the tables on player_address alone cross-multiplies every
+	// session row by the action count, inflating SUMs and COUNTs.
+	// total_hands counts distinct hands the player posted or acted in
+	// (hand_number is NULL only on rows backfill couldn't match); buy-ins and
+	// cash-outs include tournament registrations, refunds and payouts, all in
+	// micro-USDC (indexer#26).
 	err := db.QueryRowContext(ctx, `
 		SELECT
 			a.total_hands,
 			a.total_actions,
-			s.total_buy_ins,
-			s.total_cash_outs,
-			s.total_cash_outs - s.total_buy_ins as net_profit,
+			s.total_buy_ins + t.buy_ins,
+			s.total_cash_outs + t.payouts + t.refunds,
+			(s.total_cash_outs + t.payouts + t.refunds) - (s.total_buy_ins + t.buy_ins) as net_profit,
 			s.session_count,
 			s.avg_session_length,
 			s.games_played
@@ -427,9 +431,17 @@ func (db *DB) GetPlayerProfile(playerAddress string) (*models.PlayerProfile, err
 			WHERE player_address = $1) s,
 			(SELECT
 				COUNT(*) as total_actions,
-				COUNT(DISTINCT (game_id, hand_number)) as total_hands
+				COUNT(DISTINCT (game_id, hand_number)) FILTER (WHERE hand_number IS NOT NULL
+					AND action IN ('post-small-blind','post-big-blind','bet','call','raise',
+						'check','fold','all-in','show','muck','timeout')) as total_hands
 			FROM player_actions
-			WHERE player_address = $1) a
+			WHERE player_address = $1) a,
+			(SELECT
+				COALESCE(SUM(buy_in), 0) as buy_ins,
+				COALESCE(SUM(refund), 0) as refunds,
+				COALESCE(SUM(payout), 0) as payouts
+			FROM tournament_entries
+			WHERE player_address = $1) t
 	`, playerAddress).Scan(
 		&p.TotalHands, &p.TotalActions, &p.TotalBuyIns, &p.TotalCashOuts,
 		&p.NetProfit, &p.SessionCount, &p.AvgSessionLength, &p.GamesPlayed,

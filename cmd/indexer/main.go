@@ -374,7 +374,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 				// Record player action for stats
 				if player != "" && gameID != "" {
-					idx.recordPlayerAction(player, gameID, action, attrs["amount"], height)
+					idx.recordPlayerAction(player, gameID, action, attrs["amount"], attrs["hand_number"], height)
 				}
 
 				// New hand started - record the hand (never a deck)
@@ -404,6 +404,11 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			if event.Type == "player_left_game" {
 				attrs := idx.parseEventAttrs(event)
 				idx.recordPlayerSession(attrs, height, false)
+			}
+
+			// Games, Sit & Go prizes and tournament money (block52/indexer#26)
+			if moneyEventTypes[event.Type] {
+				idx.processMoneyEvent(event.Type, idx.parseEventAttrs(event), height)
 			}
 		}
 
@@ -757,14 +762,20 @@ func decodeIfBase64(s string) string {
 	return str
 }
 
-// recordPlayerAction stores a player action for stats tracking
-func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr string, blockHeight int64) {
+// recordPlayerAction stores a player action for stats tracking. The event's
+// hand_number anchors the action to its hand (indexer#26); NULL on chains too
+// old to carry it, until backfill_action_hand_numbers() matches them by block.
+func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr, handNumberStr string, blockHeight int64) {
 	amount, _ := strconv.ParseInt(amountStr, 10, 64)
+	var handNumber interface{}
+	if n, err := strconv.Atoi(handNumberStr); err == nil {
+		handNumber = n
+	}
 
 	idx.db.Exec(`
-		INSERT INTO player_actions (player_address, game_id, block_height, action, amount)
-		VALUES ($1, $2, $3, $4, $5)
-	`, player, gameID, blockHeight, action, amount)
+		INSERT INTO player_actions (player_address, game_id, hand_number, block_height, action, amount)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, player, gameID, handNumber, blockHeight, action, amount)
 }
 
 // recordPlayerSession tracks player join/leave for session stats
