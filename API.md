@@ -408,7 +408,7 @@ curl "http://localhost:8000/api/v1/analysis/seeds"
 > (`refresh_all_player_stats` + `update_vip_tiers`). Volume/money fields are
 > computed live and are always current.
 >
-> Since `sql/10-player-stats-complete.sql` (#26): `total_hands` counts distinct
+> Since `sql/12-player-stats-complete.sql` (#26): `total_hands` counts distinct
 > hands the player posted or acted in; buy-ins, cash-outs and `net_profit`
 > include Sit & Go prizes and tournament registrations, refunds and payouts;
 > VPIP/PFR are derived from the hand's action order (preflop is before the

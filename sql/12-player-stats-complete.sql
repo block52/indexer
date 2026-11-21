@@ -1,4 +1,6 @@
 -- Migration: finish the player stats the schema always promised (block52/indexer#26).
+-- Numbered 12 so it runs after 11-player-stats-hands.sql, whose narrower
+-- update_player_stats() (the hands-count fix, included here) it replaces.
 -- Idempotent: safe to run more than once, and a no-op on a fresh database.
 --
 -- Three gaps closed:
