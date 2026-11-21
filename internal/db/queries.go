@@ -349,8 +349,14 @@ func (db *DB) GetOutlierCards(threshold float64) ([]models.CardStats, error) {
 		threshold = 1.0 // Default 1% deviation
 	}
 
+	// Explicit columns: the production view has more columns than the model
+	// (total_cards_dealt), so SELECT * scans the wrong values positionally.
 	rows, err := db.QueryContext(ctx, `
-		SELECT * FROM card_frequency_analysis
+		SELECT card, rank, suit, total_appearances,
+		       expected_percentage, actual_percentage,
+		       actual_percentage - expected_percentage AS deviation,
+		       deviation_percentage
+		FROM card_frequency_analysis
 		WHERE ABS(deviation_percentage) > $1
 		ORDER BY ABS(deviation_percentage) DESC
 	`, threshold)
