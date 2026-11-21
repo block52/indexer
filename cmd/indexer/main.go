@@ -379,7 +379,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 				// Record player action for stats
 				if player != "" && gameID != "" {
-					idx.recordPlayerAction(player, gameID, action, attrs["amount"], attrs["hand_number"], height)
+					idx.recordPlayerAction(player, gameID, action, attrs["amount"], attrs["hand_number"], attrs["index"], height)
 				}
 
 				// New hand started - record the hand (never a deck)
@@ -778,17 +778,24 @@ func decodeIfBase64(s string) string {
 // recordPlayerAction stores a player action for stats tracking. The event's
 // hand_number anchors the action to its hand (indexer#26); NULL on chains too
 // old to carry it, until backfill_action_hand_numbers() matches them by block.
-func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr, handNumberStr string, blockHeight int64) {
+// The action's index within the hand makes the row unique, so re-indexing a
+// block range doesn't duplicate it (ON CONFLICT hits uniq_player_actions_hand_index).
+func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr, handNumberStr, indexStr string, blockHeight int64) {
 	amount, _ := strconv.ParseInt(amountStr, 10, 64)
 	var handNumber interface{}
 	if n, err := strconv.Atoi(handNumberStr); err == nil {
 		handNumber = n
 	}
+	var actionIndex interface{}
+	if n, err := strconv.Atoi(indexStr); err == nil && n >= 0 {
+		actionIndex = n
+	}
 
 	idx.db.Exec(`
-		INSERT INTO player_actions (player_address, game_id, hand_number, block_height, action, amount)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, player, gameID, handNumber, blockHeight, action, amount)
+		INSERT INTO player_actions (player_address, game_id, hand_number, action_index, block_height, action, amount)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT DO NOTHING
+	`, player, gameID, handNumber, actionIndex, blockHeight, action, amount)
 }
 
 // recordPlayerSession tracks player join/leave for session stats

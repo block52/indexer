@@ -124,6 +124,16 @@ SELECT backfill_action_hand_numbers();
 
 CREATE INDEX IF NOT EXISTS idx_player_actions_hand ON player_actions(game_id, hand_number);
 
+-- The event's `index` attribute is the action's global index within its hand
+-- (pokerchain#388), so (game, hand, index) identifies one action. The partial
+-- unique index makes re-indexing a block range idempotent: the indexer inserts
+-- with ON CONFLICT DO NOTHING. Legacy rows (no index on the event) stay NULL
+-- and can still duplicate under a re-scan — dedupe them by hand if ever needed.
+ALTER TABLE player_actions ADD COLUMN IF NOT EXISTS action_index INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_player_actions_hand_index
+    ON player_actions(game_id, hand_number, action_index)
+    WHERE action_index IS NOT NULL AND hand_number IS NOT NULL;
+
 -- ============================================
 -- 5. STATS CALCULATION (replaces player_stats.sql's version)
 -- ============================================
@@ -357,6 +367,13 @@ $$ LANGUAGE plpgsql;
 -- ============================================
 
 CREATE SCHEMA IF NOT EXISTS api;
+
+-- Re-list api.player_actions with the new action_index (09 defined it
+-- without). Appended last: CREATE OR REPLACE VIEW can only add at the end.
+CREATE OR REPLACE VIEW api.player_actions AS
+    SELECT id, player_address, game_id, hand_number, block_height, action, amount, round, indexed_at, action_index
+    FROM public.player_actions;
+COMMENT ON COLUMN api.player_actions.action_index IS 'The action''s index within its hand''s log; null on rows indexed before it was recorded.';
 
 CREATE OR REPLACE VIEW api.games AS
     SELECT game_id, creator, game_format, game_variant, min_players, max_players,
