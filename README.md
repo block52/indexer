@@ -186,6 +186,12 @@ The migration drops `poker_hands.deck`, deletes all stored hole cards (it can't 
 
 `06-hand-players.sql` adds `hand_players` (who played each hand, for per-wallet hand history). Hands indexed before it was applied get rows when the indexer re-runs over their blocks.
 
+`11-player-stats-hands.sql` fixes `player_stats.total_hands`, which was 0 for every player (so `/api/v1/players` showed no hands), and recomputes the stats once. It is safe to run again:
+
+```bash
+docker compose exec -T postgres psql -U poker -d poker_hands < sql/11-player-stats-hands.sql
+```
+
 ## Backfill Script
 
 The `backfill.sh` script handles everything:

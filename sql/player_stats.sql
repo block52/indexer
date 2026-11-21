@@ -225,7 +225,11 @@ BEGIN
         stats_updated_at
     ) VALUES (
         p_address,
-        COALESCE(session_totals.total_hands, action_counts.unique_hands),
+        -- Sessions only know hands_played when the indexer filled it in. SUM(...) over
+        -- sessions is never NULL (COALESCE(..., 0) above), so a plain COALESCE never
+        -- fell back and every player showed 0 hands. Use the distinct hands the player
+        -- acted in unless the sessions actually counted some.
+        COALESCE(NULLIF(session_totals.total_hands, 0), action_counts.unique_hands),
         action_counts.total_actions,
         session_totals.total_buy_in,
         session_totals.total_cash_out,
