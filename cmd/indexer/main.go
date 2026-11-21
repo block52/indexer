@@ -319,6 +319,7 @@ type Indexer struct {
 	config       Config
 	client       *http.Client
 	seenNewHands map[string]bool // track game_id to avoid duplicate queries
+	seenHandEnds map[string]bool // game_id/hand_number already end-processed this run
 }
 
 // NewIndexer creates a new indexer
@@ -328,6 +329,7 @@ func NewIndexer(db *sql.DB, config Config) *Indexer {
 		config:       config,
 		client:       &http.Client{Timeout: 30 * time.Second},
 		seenNewHands: make(map[string]bool),
+		seenHandEnds: make(map[string]bool),
 	}
 }
 
@@ -369,8 +371,11 @@ func (idx *Indexer) Run(ctx context.Context) error {
 		idx.updateProgress(height)
 
 		for _, event := range events {
-			// Handle new event types (v0.1.33+)
-			if event.Type == "hand_started" || event.Type == "hand_completed" {
+			// Handle new event types (v0.1.33+). hand_ended is processed like
+			// hand_completed: it carries the same attributes and was the only
+			// end-of-hand event while pokerchain#415 suppressed hand_completed
+			// (indexer#10) — processHandEnded dedupes when both fire.
+			if event.Type == "hand_started" || event.Type == "hand_completed" || event.Type == "hand_ended" {
 				if err := idx.processNewEvent(event, height, blockInfo.Time, ""); err != nil {
 					log.Printf("Warning: failed to process event at block %d: %v", height, err)
 				} else {
@@ -393,7 +398,7 @@ func (idx *Indexer) Run(ctx context.Context) error {
 
 				// Record player action for stats
 				if player != "" && gameID != "" {
-					idx.recordPlayerAction(player, gameID, action, attrs["amount"], height)
+					idx.recordPlayerAction(player, gameID, action, attrs["amount"], attrs["hand_number"], attrs["index"], height)
 				}
 
 				// New hand started - record the hand (never a deck)
@@ -423,6 +428,11 @@ func (idx *Indexer) Run(ctx context.Context) error {
 			if event.Type == "player_left_game" {
 				attrs := idx.parseEventAttrs(event)
 				idx.recordPlayerSession(attrs, height, false)
+			}
+
+			// Games, Sit & Go prizes and tournament money (block52/indexer#26)
+			if moneyEventTypes[event.Type] {
+				idx.processMoneyEvent(event.Type, idx.parseEventAttrs(event), height)
 			}
 		}
 
@@ -695,7 +705,15 @@ func (idx *Indexer) processNewEvent(event Event, blockHeight int64, blockTime ti
 	switch event.Type {
 	case "hand_started":
 		return idx.handleHandStarted(attrs, blockHeight, txHash)
-	case "hand_completed":
+	case "hand_completed", "hand_ended":
+		// The two fire together on current chains; the first one processed
+		// does the work and the other is skipped (upserts would make the
+		// repeat harmless, but each costs a hand-end state query).
+		key := fmt.Sprintf("%s/%s", attrs["game_id"], attrs["hand_number"])
+		if idx.seenHandEnds[key] {
+			return nil
+		}
+		idx.seenHandEnds[key] = true
 		return idx.handleHandCompleted(attrs, blockHeight, blockTime, txHash)
 	}
 	return nil
@@ -794,14 +812,27 @@ func decodeIfBase64(s string) string {
 	return str
 }
 
-// recordPlayerAction stores a player action for stats tracking
-func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr string, blockHeight int64) {
+// recordPlayerAction stores a player action for stats tracking. The event's
+// hand_number anchors the action to its hand (indexer#26); NULL on chains too
+// old to carry it, until backfill_action_hand_numbers() matches them by block.
+// The action's index within the hand makes the row unique, so re-indexing a
+// block range doesn't duplicate it (ON CONFLICT hits uniq_player_actions_hand_index).
+func (idx *Indexer) recordPlayerAction(player, gameID, action, amountStr, handNumberStr, indexStr string, blockHeight int64) {
 	amount, _ := strconv.ParseInt(amountStr, 10, 64)
+	var handNumber interface{}
+	if n, err := strconv.Atoi(handNumberStr); err == nil {
+		handNumber = n
+	}
+	var actionIndex interface{}
+	if n, err := strconv.Atoi(indexStr); err == nil && n >= 0 {
+		actionIndex = n
+	}
 
 	idx.db.Exec(`
-		INSERT INTO player_actions (player_address, game_id, block_height, action, amount)
-		VALUES ($1, $2, $3, $4, $5)
-	`, player, gameID, blockHeight, action, amount)
+		INSERT INTO player_actions (player_address, game_id, hand_number, action_index, block_height, action, amount)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT DO NOTHING
+	`, player, gameID, handNumber, actionIndex, blockHeight, action, amount)
 }
 
 // recordPlayerSession tracks player join/leave for session stats

@@ -62,9 +62,9 @@ CREATE OR REPLACE VIEW api.player_stats AS
            biggest_pot_won, biggest_hand_profit, longest_session_blocks,
            first_seen_block, last_seen_block, first_seen_at, last_seen_at, stats_updated_at
     FROM public.player_stats;
-COMMENT ON COLUMN api.player_stats.total_buy_in IS 'Micro-USDC for cash games, chips for Sit & Go and tournaments.';
-COMMENT ON COLUMN api.player_stats.total_cash_out IS 'Micro-USDC for cash games, chips for Sit & Go and tournaments.';
-COMMENT ON COLUMN api.player_stats.net_profit IS 'total_cash_out - total_buy_in, in the same units.';
+COMMENT ON COLUMN api.player_stats.total_buy_in IS 'Micro-USDC: cash and Sit & Go session buy-ins plus tournament registrations. Tournament chips are never money.';
+COMMENT ON COLUMN api.player_stats.total_cash_out IS 'Micro-USDC: session cash-outs and Sit & Go prizes plus tournament refunds and payouts.';
+COMMENT ON COLUMN api.player_stats.net_profit IS 'total_cash_out - total_buy_in, micro-USDC.';
 COMMENT ON COLUMN api.player_stats.total_rake_contributed IS 'Micro-USDC.';
 COMMENT ON COLUMN api.player_stats.current_month_rake IS 'Micro-USDC, this calendar month.';
 COMMENT ON COLUMN api.player_stats.vpip IS 'Voluntarily put money in pot, percent of hands.';
@@ -72,8 +72,8 @@ COMMENT ON COLUMN api.player_stats.pfr IS 'Preflop raise, percent of hands.';
 COMMENT ON COLUMN api.player_stats.aggression_factor IS '(bets + raises) / calls.';
 COMMENT ON COLUMN api.player_stats.wtsd IS 'Went to showdown, percent of hands.';
 COMMENT ON COLUMN api.player_stats.won_at_showdown IS 'Showdowns won, percent of showdowns reached.';
-COMMENT ON COLUMN api.player_stats.biggest_pot_won IS 'Micro-USDC for cash games, chips for Sit & Go and tournaments.';
-COMMENT ON COLUMN api.player_stats.biggest_hand_profit IS 'Micro-USDC for cash games, chips for Sit & Go and tournaments.';
+COMMENT ON COLUMN api.player_stats.biggest_pot_won IS 'Micro-USDC. Cash hands only: chip pots on Sit & Go and tournament tables are not money.';
+COMMENT ON COLUMN api.player_stats.biggest_hand_profit IS 'Micro-USDC, won minus put in. Cash hands only.';
 COMMENT ON COLUMN api.player_stats.longest_session_blocks IS 'Length of the longest session, in blocks.';
 
 CREATE OR REPLACE VIEW api.player_monthly_stats AS

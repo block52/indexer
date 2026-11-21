@@ -119,6 +119,15 @@ var Specs = []TableSpec{
 			{Name: "actions", Kind: ArrayRel, Target: "player_actions", On: playerKey},
 			{Name: "monthly", Kind: ArrayRel, Target: "player_monthly_stats", On: playerKey},
 			{Name: "tier_history", Kind: ArrayRel, Target: "vip_tier_history", On: playerKey},
+			{Name: "tournament_entries", Kind: ArrayRel, Target: "tournament_entries", On: playerKey},
+		},
+	},
+	{
+		Name:        "tournament_entries",
+		Description: "A player's tournament registrations: buy-in, any refund, and the finishing place and payout.",
+		Key:         []string{"id"},
+		Relations: []Relation{
+			{Name: "player", Kind: ObjectRel, Target: "player_stats", On: playerKey},
 		},
 	},
 	{

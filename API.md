@@ -407,6 +407,15 @@ curl "http://localhost:8000/api/v1/analysis/seeds"
 > table, which the indexer refreshes after each indexing run
 > (`refresh_all_player_stats` + `update_vip_tiers`). Volume/money fields are
 > computed live and are always current.
+>
+> Since `sql/10-player-stats-complete.sql` (#26): `total_hands` counts distinct
+> hands the player posted or acted in; buy-ins, cash-outs and `net_profit`
+> include Sit & Go prizes and tournament registrations, refunds and payouts;
+> VPIP/PFR are derived from the hand's action order (preflop is before the
+> hand's first bet or check); WTSD and W$SD come from hand-end statuses;
+> `biggest_pot_won` and `biggest_hand_profit` count cash hands only (chip pots
+> are not money); `longest_session_blocks` is the longest closed session. Open
+> sessions have no `cash_out_amount` (the field is omitted).
 
 ### `GET /api/v1/players`
 
