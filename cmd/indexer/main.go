@@ -588,8 +588,13 @@ func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64, blo
 }
 
 // recordHandResult stores a finished hand's community cards and the hole cards
-// that were shown. Cards must already be normalized.
+// that were shown. Cards must already be normalized. A hand that ended before
+// the flop (or whose snapshot is gone) has an empty board, never NULL —
+// hand_ended events carry no community_cards attribute at all (indexer#10).
 func (idx *Indexer) recordHandResult(gameID string, handNumber int, blockHeight int64, community []string, winnerCount int, shownHole []string, txHash string) error {
+	if community == nil {
+		community = []string{}
+	}
 	_, err := idx.db.Exec(`
 		INSERT INTO hand_results (game_id, hand_number, block_height, community_cards, winner_count, tx_hash)
 		VALUES ($1, $2, $3, $4, $5, $6)
