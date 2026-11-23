@@ -173,7 +173,8 @@ type PlayerSearchParams struct {
 	Offset int    `form:"offset" binding:"omitempty,min=0"`
 }
 
-// PlayerSession represents a player's game session
+// PlayerSession represents a player's game session. The game fields come from
+// the games table and are omitted while the indexer hasn't recorded the game.
 type PlayerSession struct {
 	PlayerAddress string    `json:"player_address"`
 	GameID        string    `json:"game_id"`
@@ -182,6 +183,36 @@ type PlayerSession struct {
 	BuyInAmount   int64     `json:"buy_in_amount"`
 	CashOutAmount *int64    `json:"cash_out_amount,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
+	GameFormat    *string   `json:"game_format,omitempty"`   // cash | sit-and-go | tournament
+	GameVariant   *string   `json:"game_variant,omitempty"`  // texas-holdem | omaha
+	TournamentID  *string   `json:"tournament_id,omitempty"` // set for tournament-directed tables
+}
+
+// SessionFilter narrows a player's sessions to one kind of game; empty fields match everything.
+type SessionFilter struct {
+	GameFormat  string `form:"game_format"`
+	GameVariant string `form:"game_variant"`
+}
+
+// PlayerSessionsParams are the query parameters of GET /players/:address/sessions.
+type PlayerSessionsParams struct {
+	PaginationParams
+	SessionFilter
+}
+
+// SessionGameCount is how many of a player's sessions were at one kind of game.
+type SessionGameCount struct {
+	GameFormat  string `json:"game_format"`
+	GameVariant string `json:"game_variant"`
+	Sessions    int64  `json:"sessions"`
+}
+
+// PlayerSessionsResponse is a page of sessions plus the kinds of game across all of them,
+// so a client can offer a filter without loading every session.
+type PlayerSessionsResponse struct {
+	Data       []PlayerSession    `json:"data"`
+	Pagination Pagination         `json:"pagination"`
+	Games      []SessionGameCount `json:"games"`
 }
 
 // PlayerHand is one finished hand a wallet played (ui#721 "My Hand History").
@@ -219,14 +250,17 @@ type PaginationParams struct {
 	Offset int `form:"offset" binding:"omitempty,min=0"`
 }
 
+// Pagination is a response's page window and the total row count.
+type Pagination struct {
+	Limit  int   `json:"limit"`
+	Offset int   `json:"offset"`
+	Total  int64 `json:"total"`
+}
+
 // PaginatedResponse wraps paginated data
 type PaginatedResponse struct {
 	Data       interface{} `json:"data"`
-	Pagination struct {
-		Limit  int   `json:"limit"`
-		Offset int   `json:"offset"`
-		Total  int64 `json:"total"`
-	} `json:"pagination"`
+	Pagination Pagination  `json:"pagination"`
 }
 
 // ErrorResponse represents an API error

@@ -498,15 +498,19 @@ curl "http://localhost:8000/api/v1/players/poker1abc.../stats"
 
 ### `GET /api/v1/players/:address/sessions`
 
-Get player game sessions with pagination.
+Get player game sessions with pagination, newest first, with each session's game format, variant and tournament.
 
 **Query Parameters:**
 - `limit` (int, optional): Results per page (default: 50)
 - `offset` (int, optional): Results offset (default: 0)
+- `game_format` (string, optional): Only sessions at this format: `cash`, `sit-and-go` or `tournament`
+- `game_variant` (string, optional): Only sessions at this variant: `texas-holdem` or `omaha`
+
+A filter leaves out sessions whose game the indexer hasn't recorded yet. `pagination.total` counts the filtered sessions.
 
 **Example:**
 ```bash
-curl "http://localhost:8000/api/v1/players/poker1abc.../sessions?limit=10"
+curl "http://localhost:8000/api/v1/players/poker1abc.../sessions?limit=10&game_format=cash"
 ```
 
 **Response:**
@@ -520,16 +524,27 @@ curl "http://localhost:8000/api/v1/players/poker1abc.../sessions?limit=10"
       "leave_block": 12500,
       "buy_in_amount": 5000,
       "cash_out_amount": 5500,
-      "created_at": "2024-02-24T10:00:00Z"
+      "created_at": "2024-02-24T10:00:00Z",
+      "game_format": "cash",
+      "game_variant": "texas-holdem"
     }
   ],
   "pagination": {
     "limit": 10,
     "offset": 0,
     "total": 12
-  }
+  },
+  "games": [
+    { "game_format": "cash", "game_variant": "texas-holdem", "sessions": 12 },
+    { "game_format": "sit-and-go", "game_variant": "texas-holdem", "sessions": 3 }
+  ]
 }
 ```
+
+- `data` is `[]` when there are no sessions.
+- `leave_block` and `cash_out_amount` are omitted while a session is open.
+- `game_format` and `game_variant` are omitted while the indexer hasn't recorded the game. `tournament_id` is set only on tournament-directed tables.
+- `games` counts every session the player has per format and variant, ignoring the filter and pagination, most played first, so a client can build a filter menu. Sessions at an unrecorded game aren't counted.
 
 ### `GET /api/v1/players/:address/hands`
 

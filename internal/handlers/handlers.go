@@ -489,7 +489,7 @@ func (h *Handler) GetPlayerHands(c *gin.Context) {
 func (h *Handler) GetPlayerSessions(c *gin.Context) {
 	playerAddress := c.Param("address")
 
-	var params models.PaginationParams
+	var params models.PlayerSessionsParams
 	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponse{
 			Error:   "Invalid parameters",
@@ -504,7 +504,16 @@ func (h *Handler) GetPlayerSessions(c *gin.Context) {
 		params.Limit = 50
 	}
 
-	sessions, total, err := h.db.GetPlayerSessions(playerAddress, params.Limit, params.Offset)
+	sessions, total, err := h.db.GetPlayerSessions(playerAddress, params.SessionFilter, params.Limit, params.Offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Database error",
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+	games, err := h.db.GetPlayerSessionGames(playerAddress)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
 			Error:   "Database error",
@@ -514,12 +523,9 @@ func (h *Handler) GetPlayerSessions(c *gin.Context) {
 		return
 	}
 
-	response := models.PaginatedResponse{
-		Data: sessions,
-	}
-	response.Pagination.Limit = params.Limit
-	response.Pagination.Offset = params.Offset
-	response.Pagination.Total = total
-
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, models.PlayerSessionsResponse{
+		Data:       sessions,
+		Pagination: models.Pagination{Limit: params.Limit, Offset: params.Offset, Total: total},
+		Games:      games,
+	})
 }
