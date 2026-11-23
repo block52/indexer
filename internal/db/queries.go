@@ -63,7 +63,7 @@ func (db *DB) GetHands(limit, offset int, gameID string, startBlock, endBlock in
 	}
 	defer rows.Close()
 
-	var hands []models.PokerHand
+	hands := []models.PokerHand{} // an empty page is [], not null
 	for rows.Next() {
 		var hand models.PokerHand
 		if err := rows.Scan(&hand.GameID, &hand.HandNumber, &hand.BlockHeight, &hand.DeckSeed, &hand.TxHash, &hand.CreatedAt); err != nil {
@@ -552,40 +552,85 @@ func (db *DB) SearchPlayers(params models.PlayerSearchParams) ([]models.PlayerLi
 	return players, total, nil
 }
 
-// GetPlayerSessions retrieves player game sessions
-func (db *DB) GetPlayerSessions(playerAddress string, limit, offset int) ([]models.PlayerSession, int64, error) {
+// sessionFilterSQL matches a player's sessions, optionally at one game format and/or variant.
+// A filter on a field excludes sessions whose game the indexer hasn't recorded.
+const sessionFilterSQL = `
+		FROM player_sessions s
+		LEFT JOIN games g ON g.game_id = s.game_id
+		WHERE s.player_address = $1
+		  AND ($2 = '' OR g.game_format = $2)
+		  AND ($3 = '' OR g.game_variant = $3)`
+
+// GetPlayerSessions retrieves a page of player game sessions, newest first, with each
+// session's game format, variant and tournament from the games table.
+func (db *DB) GetPlayerSessions(playerAddress string, filter models.SessionFilter, limit, offset int) ([]models.PlayerSession, int64, error) {
 	ctx, cancel := getContext()
 	defer cancel()
 
-	// Get total count
 	var total int64
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM player_sessions WHERE player_address = $1`, playerAddress).Scan(&total); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*)`+sessionFilterSQL, playerAddress, filter.GameFormat, filter.GameVariant).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count sessions: %w", err)
 	}
 
-	// Get paginated sessions
 	rows, err := db.QueryContext(ctx, `
-		SELECT player_address, game_id, join_block, leave_block, buy_in_amount, cash_out_amount, indexed_at
-		FROM player_sessions
-		WHERE player_address = $1
-		ORDER BY join_block DESC
-		LIMIT $2 OFFSET $3
-	`, playerAddress, limit, offset)
+		SELECT s.player_address, s.game_id, s.join_block, s.leave_block, s.buy_in_amount, s.cash_out_amount, s.indexed_at,
+		       g.game_format, g.game_variant, g.tournament_id`+sessionFilterSQL+`
+		ORDER BY s.join_block DESC
+		LIMIT $4 OFFSET $5
+	`, playerAddress, filter.GameFormat, filter.GameVariant, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query sessions: %w", err)
 	}
 	defer rows.Close()
 
-	var sessions []models.PlayerSession
+	sessions := []models.PlayerSession{} // an empty page is [], not null
 	for rows.Next() {
 		var session models.PlayerSession
-		if err := rows.Scan(&session.PlayerAddress, &session.GameID, &session.JoinBlock, &session.LeaveBlock, &session.BuyInAmount, &session.CashOutAmount, &session.CreatedAt); err != nil {
+		if err := rows.Scan(&session.PlayerAddress, &session.GameID, &session.JoinBlock, &session.LeaveBlock, &session.BuyInAmount, &session.CashOutAmount, &session.CreatedAt,
+			&session.GameFormat, &session.GameVariant, &session.TournamentID); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan session: %w", err)
 		}
 		sessions = append(sessions, session)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("failed to read sessions: %w", err)
+	}
 
 	return sessions, total, nil
+}
+
+// GetPlayerSessionGames counts a player's sessions per game format and variant, across all
+// their sessions (not one filtered page), most played first. Sessions at a game the indexer
+// hasn't recorded are left out.
+func (db *DB) GetPlayerSessionGames(playerAddress string) ([]models.SessionGameCount, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT g.game_format, g.game_variant, COUNT(*)
+		FROM player_sessions s
+		JOIN games g ON g.game_id = s.game_id
+		WHERE s.player_address = $1 AND g.game_format IS NOT NULL AND g.game_variant IS NOT NULL
+		GROUP BY g.game_format, g.game_variant
+		ORDER BY COUNT(*) DESC, g.game_format, g.game_variant
+	`, playerAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count session games: %w", err)
+	}
+	defer rows.Close()
+
+	games := []models.SessionGameCount{}
+	for rows.Next() {
+		var game models.SessionGameCount
+		if err := rows.Scan(&game.GameFormat, &game.GameVariant, &game.Sessions); err != nil {
+			return nil, fmt.Errorf("failed to scan session game: %w", err)
+		}
+		games = append(games, game)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read session games: %w", err)
+	}
+	return games, nil
 }
 
 // GetPlayerHands lists the finished hands a wallet played, newest first.
